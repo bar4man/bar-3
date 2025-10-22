@@ -53,7 +53,7 @@ class ConfigManager:
             "autorole": None,
             "grape_gifs": [],
             "member_numbers": {},
-            "prefix": "~~",
+            "prefix": "~",
             "allowed_channels": [],
             "mod_log_channel": None
         }
@@ -158,7 +158,7 @@ class Bot(commands.Bot):
     
     def __init__(self):
         super().__init__(
-            command_prefix="~~",
+            command_prefix="~",
             intents=intents,
             help_command=None,
             case_insensitive=True
@@ -177,7 +177,7 @@ class Bot(commands.Bot):
         await self.change_presence(
             activity=discord.Activity(
                 type=discord.ActivityType.watching,
-                name="~~help | Economy & Bar"
+                name="~help | Economy & Bar"
             ),
             status=discord.Status.online
         )
@@ -205,7 +205,7 @@ async def on_command_error(ctx, error):
     if isinstance(error, commands.MissingRequiredArgument):
         error_embed.title = "❌ Missing Argument"
         error_embed.description = f"Missing required argument: `{error.param.name}`"
-        error_embed.set_footer(text=f"Use ~~help {ctx.command} for more info")
+        error_embed.set_footer(text=f"Use ~help {ctx.command} for more info")
         
     elif isinstance(error, commands.BadArgument):
         error_embed.title = "❌ Invalid Argument"
@@ -361,7 +361,7 @@ async def before_auto_cleaner():
 # ---------------- Enhanced Help System ----------------
 @bot.command(name="help")
 async def help_command(ctx: commands.Context, category: str = None):
-    """Main help command with categories. Use ~~help admin or ~~help economy."""
+    """Main help command with categories. Use ~help admin or ~help economy."""
     if category and category.lower() in ["admin", "economy", "markets", "gambling", "bartender"]:
         await _show_category_help(ctx, category.lower())
     else:
@@ -371,7 +371,7 @@ async def _show_general_help(ctx: commands.Context):
     """Show general help with categorized commands."""
     embed = discord.Embed(
         title="🤖 Bot Help - Command Categories",
-        description="Use `~~help <category>` for specific command lists.\n\n**Available Categories:**",
+        description="Use `~help <category>` for specific command lists.\n\n**Available Categories:**",
         color=discord.Color.blue()
     )
     
@@ -392,16 +392,16 @@ async def _show_general_help(ctx: commands.Context):
     embed.add_field(
         name="📁 Command Categories",
         value=(
-            "**~~help admin** - Moderation and server management\n"
-            "**~~help economy** - Money, work, and daily rewards\n"
-            "**~~help markets** - Stock market and gold trading\n"
-            "**~~help gambling** - Games and betting\n"
-            "**~~help bartender** - Bar and drinks system\n"  # ← NEW CATEGORY
-            "**~~admin** - Direct admin commands\n"
-            "**~~economy** - Direct economy commands\n"
-            "**~~markets** - Direct market commands\n"
-            "**~~gambling** - Direct gambling commands\n"
-            "**~~bartender** - Direct bartender commands"  # ← NEW COMMAND
+            "**~help admin** - Moderation and server management\n"
+            "**~help economy** - Money, work, and daily rewards\n"
+            "**~help markets** - Stock market and gold trading\n"
+            "**~help gambling** - Games and betting\n"
+            "**~help bartender** - Bar and drinks system\n"  # ← NEW CATEGORY
+            "**~admin** - Direct admin commands\n"
+            "**~economy** - Direct economy commands\n"
+            "**~markets** - Direct market commands\n"
+            "**~gambling** - Direct gambling commands\n"
+            "**~bartender** - Direct bartender commands"  # ← NEW COMMAND
         ),
         inline=False
     )
@@ -409,17 +409,17 @@ async def _show_general_help(ctx: commands.Context):
     embed.add_field(
         name="💡 Quick Start",
         value=(
-            "• Use `~~economy` to see money commands\n"
-            "• Use `~~markets` for stock trading\n"
-            "• Use `~~gambling` for fun games\n"
-            "• Use `~~bartender` for drinks and bar\n"  # ← NEW LINE
-            "• Use `~~admin` for moderation tools\n"
+            "• Use `~economy` to see money commands\n"
+            "• Use `~markets` for stock trading\n"
+            "• Use `~gambling` for fun games\n"
+            "• Use `~bartender` for drinks and bar\n"  # ← NEW LINE
+            "• Use `~admin` for moderation tools\n"
             "• Most commands have cooldowns for balance"
         ),
         inline=False
     )
     
-    embed.set_footer(text=f"Use ~~help <category> for detailed commands")
+    embed.set_footer(text=f"Use ~help <category> for detailed commands")
     await ctx.send(embed=embed)
 
 async def _show_category_help(ctx: commands.Context, category: str):
@@ -563,8 +563,8 @@ async def _show_economy_help(ctx: commands.Context):
             "• **Payments use WALLET money**\n"
             "• **Excess money is LOST** if over limits\n"
             "• **Penalty:** Lose 1£ for impossible deposits\n"
-            "• Use `~~deposit` to move money to bank\n"
-            "• Use `~~withdraw` to get money from bank"
+            "• Use `~deposit` to move money to bank\n"
+            "• Use `~withdraw` to get money from bank"
         ),
         inline=False
     )
@@ -595,12 +595,14 @@ async def _show_markets_help(ctx: commands.Context):
         inline=False
     )
     
-    # Trading Commands
+    # Trading Commands (UPDATED)
     trading_cmds = [
-        "`buy stock <symbol> <shares>` - Buy stock shares",
-        "`buy gold <ounces>` - Buy gold ounces", 
-        "`sell stock <symbol> <shares>` - Sell stock shares",
-        "`sell gold <ounces>` - Sell gold ounces"
+        "`buyinvest stock <symbol> <shares>` - Buy stock shares",
+        "`buyinvest gold <ounces>` - Buy gold ounces", 
+        "`sellinvest stock <symbol> <shares>` - Sell stock shares",
+        "`sellinvest gold <ounces>` - Sell gold ounces",
+        "`ibuy` - Shortcut for buyinvest",
+        "`isell` - Shortcut for sellinvest"
     ]
     
     embed.add_field(
@@ -625,7 +627,7 @@ async def _show_markets_help(ctx: commands.Context):
     stocks_list = "TECH, ENERGY, BANK, PHARMA, AUTO"
     embed.add_field(
         name="📈 Available Stocks",
-        value=f"**Symbols:** {stocks_list}\nUse `~~stocks <symbol>` for details",
+        value=f"**Symbols:** {stocks_list}\nUse `~stocks <symbol>` for details",
         inline=False
     )
     
@@ -637,7 +639,7 @@ async def _show_markets_help(ctx: commands.Context):
             "• **Stock Fees:** 0.5% per transaction\n"
             "• **Gold Fees:** 1% per transaction\n"
             "• **Funding:** All trades use BANK money\n"
-            "• **Portfolio:** Track your investments with `~~portfolio`"
+            "• **Portfolio:** Track your investments with `~portfolio`"
         ),
         inline=False
     )
@@ -848,7 +850,7 @@ async def on_ready():
     await bot.change_presence(
         activity=discord.Activity(
             type=discord.ActivityType.watching,
-            name="~~help | Economy & Bar"  # ← UPDATED STATUS
+            name="~help | Economy & Bar"  # ← UPDATED STATUS
         ),
         status=discord.Status.online
     )
