@@ -666,8 +666,8 @@ class MarketCog(commands.Cog):
                 name="💡 Getting Started",
                 value=(
                     "Your portfolio is empty! Start investing with:\n"
-                    "• `~~buy gold <ounces>` - Buy gold\n"
-                    "• `~~buy stock <symbol> <shares>` - Buy stocks\n"
+                    "• `~~buyinvest gold <ounces>` - Buy gold\n"
+                    "• `~~buyinvest stock <symbol> <shares>` - Buy stocks\n"
                     "• `~~market` - View current prices\n"
                     "**Remember:** All investments use BANK money!"
                 ),
@@ -676,12 +676,12 @@ class MarketCog(commands.Cog):
         
         await ctx.send(embed=embed)
 
-    @commands.command(name="buy")
-    async def buy(self, ctx: commands.Context, asset_type: str, *, args: str):
-        """Buy stocks or gold."""
+    @commands.command(name="buyinvest", aliases=["investbuy", "ibuy"])
+    async def buy_investment(self, ctx: commands.Context, asset_type: str, *, args: str):
+        """Buy stocks or gold for investment."""
         if asset_type.lower() not in ["stock", "gold"]:
             embed = await self.create_market_embed("❌ Invalid Asset Type", discord.Color.red())
-            embed.description = "Please specify either `stock` or `gold`.\n\n**Examples:**\n`~~buy stock TECH 10` - Buy 10 shares of TECH\n`~~buy gold 5` - Buy 5 ounces of gold"
+            embed.description = "Please specify either `stock` or `gold`.\n\n**Examples:**\n`~~buyinvest stock TECH 10` - Buy 10 shares of TECH\n`~~buyinvest gold 5` - Buy 5 ounces of gold"
             return await ctx.send(embed=embed)
         
         if not self.market.market_open:
@@ -694,7 +694,7 @@ class MarketCog(commands.Cog):
                 parts = args.split()
                 if len(parts) < 2:
                     embed = await self.create_market_embed("❌ Invalid Syntax", discord.Color.red())
-                    embed.description = "Usage: `~~buy stock <symbol> <shares>`\nExample: `~~buy stock TECH 10`"
+                    embed.description = "Usage: `~~buyinvest stock <symbol> <shares>`\nExample: `~~buyinvest stock TECH 10`"
                     return await ctx.send(embed=embed)
                 
                 symbol = parts[0].upper()
@@ -782,7 +782,7 @@ class MarketCog(commands.Cog):
                     
                 except ValueError:
                     embed = await self.create_market_embed("❌ Invalid Amount", discord.Color.red())
-                    embed.description = "Please provide a valid number of ounces.\nExample: `~~buy gold 2.5`"
+                    embed.description = "Please provide a valid number of ounces.\nExample: `~~buyinvest gold 2.5`"
                     return await ctx.send(embed=embed)
             
             await ctx.send(embed=embed)
@@ -793,12 +793,12 @@ class MarketCog(commands.Cog):
             embed.description = "An error occurred during the transaction. Please try again."
             await ctx.send(embed=embed)
 
-    @commands.command(name="sell")
-    async def sell(self, ctx: commands.Context, asset_type: str, *, args: str):
-        """Sell stocks or gold."""
+    @commands.command(name="sellinvest", aliases=["investsell", "isell"])
+    async def sell_investment(self, ctx: commands.Context, asset_type: str, *, args: str):
+        """Sell stocks or gold from your investment portfolio."""
         if asset_type.lower() not in ["stock", "gold"]:
             embed = await self.create_market_embed("❌ Invalid Asset Type", discord.Color.red())
-            embed.description = "Please specify either `stock` or `gold`.\n\n**Examples:**\n`~~sell stock TECH 10` - Sell 10 shares of TECH\n`~~sell gold 5` - Sell 5 ounces of gold"
+            embed.description = "Please specify either `stock` or `gold`.\n\n**Examples:**\n`~~sellinvest stock TECH 10` - Sell 10 shares of TECH\n`~~sellinvest gold 5` - Sell 5 ounces of gold"
             return await ctx.send(embed=embed)
         
         if not self.market.market_open:
@@ -811,7 +811,7 @@ class MarketCog(commands.Cog):
                 parts = args.split()
                 if len(parts) < 2:
                     embed = await self.create_market_embed("❌ Invalid Syntax", discord.Color.red())
-                    embed.description = "Usage: `~~sell stock <symbol> <shares>`\nExample: `~~sell stock TECH 10`"
+                    embed.description = "Usage: `~~sellinvest stock <symbol> <shares>`\nExample: `~~sellinvest stock TECH 10`"
                     return await ctx.send(embed=embed)
                 
                 symbol = parts[0].upper()
@@ -903,7 +903,7 @@ class MarketCog(commands.Cog):
                     
                 except ValueError:
                     embed = await self.create_market_embed("❌ Invalid Amount", discord.Color.red())
-                    embed.description = "Please provide a valid number of ounces.\nExample: `~~sell gold 2.5`"
+                    embed.description = "Please provide a valid number of ounces.\nExample: `~~sellinvest gold 2.5`"
                     return await ctx.send(embed=embed)
             
             await ctx.send(embed=embed)
