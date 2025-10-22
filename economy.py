@@ -819,7 +819,7 @@ class Economy(commands.Cog):
         
         if member == ctx.author:
             embed.add_field(name="💡 Quick Actions", 
-                          value="• Use `~~deposit <amount>` to move money to bank\n• Use `~~withdraw <amount>` to get money from bank\n• Use `~~upgrade wallet` to increase wallet limit", 
+                          value="• Use `~deposit <amount>` to move money to bank\n• Use `~withdraw <amount>` to get money from bank\n• Use `~upgrade wallet` to increase wallet limit", 
                           inline=False)
         
         await ctx.send(embed=embed)
@@ -847,7 +847,7 @@ class Economy(commands.Cog):
         
         if member == ctx.author:
             embed.add_field(name="💡 Quick Actions", 
-                          value="• Use `~~deposit <amount|all>` to add money\n• Use `~~withdraw <amount|all>` to take money\n• Use `~~upgrade bank` to increase bank limit\n• **Shop purchases use bank money!**", 
+                          value="• Use `~deposit <amount|all>` to add money\n• Use `~withdraw <amount|all>` to take money\n• Use `~upgrade bank` to increase bank limit\n• **Shop purchases use bank money!**", 
                           inline=False)
         
         await ctx.send(embed=embed)
@@ -894,7 +894,7 @@ class Economy(commands.Cog):
         
         if member == ctx.author:
             embed.add_field(name="📈 Growth Tips", 
-                          value="• Use `~~work` every hour\n• Claim `~~daily` rewards\n• Play games for bonuses\n• **Upgrade your bank to store more money!**", 
+                          value="• Use `~work` every hour\n• Claim `~daily` rewards\n• Play games for bonuses\n• **Upgrade your bank to store more money!**", 
                           inline=False)
         
         await ctx.send(embed=embed)
@@ -1040,7 +1040,7 @@ class Economy(commands.Cog):
         """Upgrade your wallet or bank limits with scaling costs."""
         if not upgrade_type or upgrade_type.lower() not in ["wallet", "bank"]:
             embed = await self.create_economy_embed("🛠️ Upgrade System", discord.Color.blue())
-            embed.description = "Upgrade your wallet or bank limits with scaling costs.\n\n**Usage:** `~~upgrade wallet` or `~~upgrade bank`"
+            embed.description = "Upgrade your wallet or bank limits with scaling costs.\n\n**Usage:** `~upgrade wallet` or `~upgrade bank`"
             embed.add_field(
                 name="💵 Wallet Upgrades", 
                 value="• Increases how much cash you can carry\n• Essential for transfers and payments\n• Starts at 50k, scales infinitely",
@@ -1212,8 +1212,8 @@ class Economy(commands.Cog):
         """Flip a coin - bet on heads or tails."""
         if not choice or not bet:
             embed = await self.create_economy_embed("🎲 Coin Flip Game", discord.Color.blue())
-            embed.description = "Flip a coin and double your money!\n\n**Usage:** `~~flip <heads/tails> <bet>`"
-            embed.add_field(name="Example", value="`~~flip heads 100` - Bet 100£ on heads", inline=False)
+            embed.description = "Flip a coin and double your money!\n\n**Usage:** `~flip <heads/tails> <bet>`"
+            embed.add_field(name="Example", value="`~flip heads 100` - Bet 100£ on heads", inline=False)
             embed.add_field(name="Payout", value="**2x** your bet if you win!", inline=False)
             return await ctx.send(embed=embed)
         
@@ -1274,7 +1274,7 @@ class Economy(commands.Cog):
         """Roll a dice - win 6x your bet if you roll a 6."""
         if not bet:
             embed = await self.create_economy_embed("🎯 Dice Game", discord.Color.blue())
-            embed.description = "Roll a dice and win big!\n\n**Usage:** `~~dice <bet>`"
+            embed.description = "Roll a dice and win big!\n\n**Usage:** `~dice <bet>`"
             embed.add_field(name="Payout", value="**6x** your bet if you roll a 6!", inline=False)
             embed.add_field(name="Win Chance", value="1 in 6 (16.67%)", inline=False)
             return await ctx.send(embed=embed)
@@ -1330,7 +1330,7 @@ class Economy(commands.Cog):
         """Play slots - match 3 symbols to win!"""
         if not bet:
             embed = await self.create_economy_embed("🎰 Slot Machine", discord.Color.blue())
-            embed.description = "Play the slot machine and win big!\n\n**Usage:** `~~slots <bet>`"
+            embed.description = "Play the slot machine and win big!\n\n**Usage:** `~slots <bet>`"
             embed.add_field(name="Payouts", value="• 3x **🍒** - 10x bet\n• 3x **🍋** - 5x bet\n• 3x **🍊** - 3x bet\n• 3x **💎** - 20x bet", inline=False)
             return await ctx.send(embed=embed)
         
@@ -1396,7 +1396,7 @@ class Economy(commands.Cog):
         
         if not inventory:
             embed = await self.create_economy_embed(f"🎒 {member.display_name}'s Inventory", discord.Color.blue())
-            embed.description = "Your inventory is empty.\nUse `~~shop` to buy some items!"
+            embed.description = "Your inventory is empty.\nUse `~shop` to buy some items!"
             await ctx.send(embed=embed)
             return
         
@@ -1415,7 +1415,7 @@ class Economy(commands.Cog):
         
         embed.add_field(
             name="💡 How to Use",
-            value="Use `~~use <item_id>` to use an item.\nExample: `~~use 7` to use item with ID 7",
+            value="Use `~use <item_id>` to use an item.\nExample: `~use 7` to use item with ID 7",
             inline=False
         )
         
@@ -1426,16 +1426,16 @@ class Economy(commands.Cog):
         """Use an item from your inventory."""
         if not item_id:
             embed = await self.create_economy_embed("🎒 Use Item", discord.Color.blue())
-            embed.description = "Use an item from your inventory.\n\n**Usage:** `~~use <item_id>`"
-            embed.add_field(name="Example", value="`~~use 7` - Use the item with ID 7", inline=False)
-            embed.add_field(name="Find Item IDs", value="Use `~~inventory` to see your items and their IDs", inline=False)
+            embed.description = "Use an item from your inventory.\n\n**Usage:** `~use <item_id>`"
+            embed.add_field(name="Example", value="`~use 7` - Use the item with ID 7", inline=False)
+            embed.add_field(name="Find Item IDs", value="Use `~inventory` to see your items and their IDs", inline=False)
             return await ctx.send(embed=embed)
         
         # Get item from inventory
         inventory_item = await self.get_inventory_item(ctx.author.id, item_id)
         if not inventory_item:
             embed = await self.create_economy_embed("❌ Item Not Found", discord.Color.red())
-            embed.description = f"You don't have an item with ID `{item_id}` in your inventory.\nUse `~~inventory` to see your items."
+            embed.description = f"You don't have an item with ID `{item_id}` in your inventory.\nUse `~inventory` to see your items."
             return await ctx.send(embed=embed)
         
         # Get shop item details
@@ -1503,7 +1503,7 @@ class Economy(commands.Cog):
             return await ctx.send(embed=embed)
         
         embed = await self.create_economy_embed("🛍️ Economy Shop")
-        embed.description = "**Important:** All shop purchases use money from your **BANK**!\nUse `~~deposit` to move money to your bank first.\n\n"
+        embed.description = "**Important:** All shop purchases use money from your **BANK**!\nUse `~deposit` to move money to your bank first.\n\n"
         
         for item in shop_items:
             stock_info = "∞" if item.get("stock", -1) == -1 else f"{item['stock']} left"
@@ -1515,7 +1515,7 @@ class Economy(commands.Cog):
         
         embed.add_field(
             name="💡 How to Buy",
-            value="Use `~~buy <item_id>` to purchase an item.\nExample: `~~buy 1`\n**Remember:** You need the money in your **BANK**!",
+            value="Use `~buy <item_id>` to purchase an item.\nExample: `~buy 1`\n**Remember:** You need the money in your **BANK**!",
             inline=False
         )
         
@@ -1527,7 +1527,7 @@ class Economy(commands.Cog):
         item = await self.get_shop_item(item_id)
         if not item:
             embed = await self.create_economy_embed("❌ Item Not Found", discord.Color.red())
-            embed.description = f"No item found with ID `{item_id}`. Use `~~shop` to see available items."
+            embed.description = f"No item found with ID `{item_id}`. Use `~shop` to see available items."
             return await ctx.send(embed=embed)
         
         # Check stock
@@ -1540,7 +1540,7 @@ class Economy(commands.Cog):
         user_data = await self.get_user(ctx.author.id)
         if user_data["bank"] < item["price"]:
             embed = await self.create_economy_embed("❌ Insufficient Bank Funds", discord.Color.red())
-            embed.description = f"You need {self.format_money(item['price'])} in your **BANK** but only have {self.format_money(user_data['bank'])}.\nUse `~~deposit` to move money from wallet to bank."
+            embed.description = f"You need {self.format_money(item['price'])} in your **BANK** but only have {self.format_money(user_data['bank'])}.\nUse `~deposit` to move money from wallet to bank."
             return await ctx.send(embed=embed)
         
         # Process purchase from BANK
@@ -1577,7 +1577,7 @@ class Economy(commands.Cog):
         elif item["type"] in ["consumable", "permanent"]:
             embed.add_field(
                 name="📦 Item Stored",
-                value="Use `~~inventory` to view your items and `~~use <item_id>` to use consumables.",
+                value="Use `~inventory` to view your items and `~use <item_id>` to use consumables.",
                 inline=False
             )
         
@@ -1609,7 +1609,7 @@ class Economy(commands.Cog):
         user_data = await self.get_user(ctx.author.id)
         if user_data["wallet"] < amount:
             embed = await self.create_economy_embed("❌ Insufficient Wallet Funds", discord.Color.red())
-            embed.description = f"You only have {self.format_money(user_data['wallet'])} in your wallet.\nUse `~~withdraw` to get money from your bank."
+            embed.description = f"You only have {self.format_money(user_data['wallet'])} in your wallet.\nUse `~withdraw` to get money from your bank."
             return await ctx.send(embed=embed)
         
         # Check if receiver has wallet space - if not, money is LOST
