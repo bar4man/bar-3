@@ -718,13 +718,13 @@ async def _show_bartender_help(ctx: commands.Context):  # ← NEW HELP CATEGORY
         color=discord.Color.orange()
     )
     
-    # Drinking Commands
+    # Drinking Commands (UPDATED)
     drinking_cmds = [
-        "`drink` - View drink menu or order a drink",
-        "`drinkmenu` - Show detailed drink menu", 
-        "`drinkinfo <drink>` - Get info about a specific drink",
-        "`mydrinks [user]` - View your drink history and bar status",
-        "`soberup` - Order water to sober up"
+        "`~drink` - View drink menu or order a drink",
+        "`~drink-menu` - Show detailed drink menu", 
+        "`~drink-info <drink>` - Get info about a specific drink",
+        "`~my-drinks [user]` - View your drink history and bar status",
+        "`~sober-up` - Order water to sober up"
     ]
     
     embed.add_field(
@@ -733,11 +733,11 @@ async def _show_bartender_help(ctx: commands.Context):  # ← NEW HELP CATEGORY
         inline=False
     )
     
-    # Social Commands
+    # Social Commands (UPDATED)
     social_cmds = [
-        "`drink buy <user> <drink>` - Buy a drink for someone",
-        "`toast` - Start a group toast (coming soon)",
-        "`cheers` - Cheer with everyone (coming soon)"
+        "`~drink-buy <user> <drink>` - Buy a drink for someone",
+        "`~toast` - Start a group toast (coming soon)",
+        "`~cheers` - Cheer with everyone (coming soon)"
     ]
     
     embed.add_field(
