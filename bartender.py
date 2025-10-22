@@ -246,7 +246,7 @@ class BartenderCog(commands.Cog):
         
         embed.add_field(
             name="💡 How to Order",
-            value="Use `~~drink <name>` to order a drink!\nExample: `~~drink beer` or `~~drink martini`",
+            value="Use `~drink <name>` to order a drink!\nExample: `~drink beer` or `~drink martini`",
             inline=False
         )
         
@@ -269,7 +269,7 @@ class BartenderCog(commands.Cog):
         
         if drink_key not in self.drinks:
             embed = await self.create_bar_embed("❌ Drink Not Found", discord.Color.red())
-            embed.description = f"**{drink_key}** is not on the menu. Use `~~drink` to see available drinks."
+            embed.description = f"**{drink_key}** is not on the menu. Use `~drink` to see available drinks."
             
             # Suggest similar drinks
             similar = [k for k in self.drinks.keys() if drink_key in k]
@@ -292,7 +292,7 @@ class BartenderCog(commands.Cog):
             embed.description = (
                 f"{drink['name']} costs {self.format_money(drink['price'])}, "
                 f"but you only have {self.format_money(user_data['wallet'])} in your wallet.\n\n"
-                f"Use `~~withdraw` to get money from your bank, or `~~work` to earn more!"
+                f"Use `~withdraw` to get money from your bank, or `~work` to earn more!"
             )
             await ctx.send(embed=embed)
             return
@@ -369,7 +369,7 @@ class BartenderCog(commands.Cog):
         """Get detailed information about a specific drink."""
         if not drink_key:
             embed = await self.create_bar_embed("ℹ️ Drink Information", discord.Color.blue())
-            embed.description = "Use `~~drinkinfo <drink>` to learn about a specific drink.\nExample: `~~drinkinfo whiskey`"
+            embed.description = "Use `~drinkinfo <drink>` to learn about a specific drink.\nExample: `~drinkinfo whiskey`"
             await ctx.send(embed=embed)
             return
         
@@ -377,7 +377,7 @@ class BartenderCog(commands.Cog):
         
         if drink_key not in self.drinks:
             embed = await self.create_bar_embed("❌ Drink Not Found", discord.Color.red())
-            embed.description = f"**{drink_key}** is not on our menu. Use `~~drink` to see available drinks."
+            embed.description = f"**{drink_key}** is not on our menu. Use `~drink` to see available drinks."
             await ctx.send(embed=embed)
             return
         
@@ -493,10 +493,10 @@ class BartenderCog(commands.Cog):
         """Buy a drink for another user."""
         if not member or not drink_key:
             embed = await self.create_bar_embed("🍻 Buy a Drink for Someone", discord.Color.blue())
-            embed.description = "Buy a drink for a friend!\n\n**Usage:** `~~drinkbuy @user <drink>`\n**Example:** `~~drinkbuy @John beer`"
+            embed.description = "Buy a drink for a friend!\n\n**Usage:** `~drinkbuy @user <drink>`\n**Example:** `~drinkbuy @John beer`"
             embed.add_field(
                 name="💡 Tip",
-                value="Use `~~drink` to see available drinks and prices",
+                value="Use `~drink` to see available drinks and prices",
                 inline=False
             )
             await ctx.send(embed=embed)
@@ -504,7 +504,7 @@ class BartenderCog(commands.Cog):
         
         if member == ctx.author:
             embed = await self.create_bar_embed("❌ Can't Buy Yourself a Drink", discord.Color.red())
-            embed.description = "You can't buy a drink for yourself! Use `~~drink <drink>` to order for yourself."
+            embed.description = "You can't buy a drink for yourself! Use `~drink <drink>` to order for yourself."
             await ctx.send(embed=embed)
             return
         
@@ -518,7 +518,7 @@ class BartenderCog(commands.Cog):
         
         if drink_key not in self.drinks:
             embed = await self.create_bar_embed("❌ Drink Not Found", discord.Color.red())
-            embed.description = f"**{drink_key}** is not on the menu. Use `~~drink` to see available drinks."
+            embed.description = f"**{drink_key}** is not on the menu. Use `~drink` to see available drinks."
             await ctx.send(embed=embed)
             return
         
