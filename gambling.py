@@ -74,8 +74,8 @@ class Gambling(commands.Cog):
         """Play Rock Paper Scissors."""
         if not choice or not bet:
             embed = await self.create_gambling_embed("✂️ Rock Paper Scissors", discord.Color.blue())
-            embed.description = "Play Rock Paper Scissors against the bot!\n\n**Usage:** `~~rps <rock/paper/scissors> <bet>`"
-            embed.add_field(name="Example", value="`~~rps rock 100` - Bet 100£ on rock", inline=False)
+            embed.description = "Play Rock Paper Scissors against the bot!\n\n**Usage:** `~rps <rock/paper/scissors> <bet>`"
+            embed.add_field(name="Example", value="`~rps rock 100` - Bet 100£ on rock", inline=False)
             embed.add_field(name="Payout", value="**2x** your bet if you win!", inline=False)
             embed.add_field(name="Rules", value="• **Win:** 2x your bet\n• **Tie:** Return your bet\n• **Lose:** Lose your bet", inline=False)
             return await ctx.send(embed=embed)
@@ -141,7 +141,7 @@ class Gambling(commands.Cog):
         """Guess if the next card will be higher or lower."""
         if not bet:
             embed = await self.create_gambling_embed("🎴 High-Low Game", discord.Color.blue())
-            embed.description = "Guess if the next card will be higher or lower!\n\n**Usage:** `~~highlow <bet>`\nThen react with ⬆️ for higher or ⬇️ for lower."
+            embed.description = "Guess if the next card will be higher or lower!\n\n**Usage:** `~highlow <bet>`\nThen react with ⬆️ for higher or ⬇️ for lower."
             embed.add_field(name="Payout", value="**2x** your bet if you guess correctly!", inline=False)
             embed.add_field(name="Cards", value="Ace (low) to King (high)", inline=False)
             return await ctx.send(embed=embed)
