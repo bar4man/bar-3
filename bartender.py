@@ -359,17 +359,17 @@ class BartenderCog(commands.Cog):
         
         await ctx.send(embed=embed)
     
-    @commands.command(name="drinkmenu", aliases=["menu", "barmenu"])
+    @commands.command(name="drink-menu", aliases=["menu", "bar-menu", "drinkmenu"])
     async def drink_menu_detailed(self, ctx: commands.Context):
         """Show the detailed drink menu."""
         await self.show_drink_menu(ctx)
     
-    @commands.command(name="drinkinfo", aliases=["drinkabout"])
+    @commands.command(name="drink-info", aliases=["drinkabout", "drinkinfo"])
     async def drink_info(self, ctx: commands.Context, drink_key: str = None):
         """Get detailed information about a specific drink."""
         if not drink_key:
             embed = await self.create_bar_embed("ℹ️ Drink Information", discord.Color.blue())
-            embed.description = "Use `~drinkinfo <drink>` to learn about a specific drink.\nExample: `~drinkinfo whiskey`"
+            embed.description = "Use `~drink-info <drink>` to learn about a specific drink.\nExample: `~drink-info whiskey`"
             await ctx.send(embed=embed)
             return
         
@@ -416,7 +416,7 @@ class BartenderCog(commands.Cog):
         
         await ctx.send(embed=embed)
     
-    @commands.command(name="mydrinks", aliases=["drinkhistory", "bartab"])
+    @commands.command(name="my-drinks", aliases=["drink-history", "bar-tab", "mydrinks", "drinkhistory", "bartab"])
     async def my_drinks(self, ctx: commands.Context, member: discord.Member = None):
         """View your drink history and bar status."""
         member = member or ctx.author
@@ -483,17 +483,17 @@ class BartenderCog(commands.Cog):
         
         await ctx.send(embed=embed)
     
-    @commands.command(name="soberup", aliases=["sober", "water"])
+    @commands.command(name="sober-up", aliases=["sober", "water", "soberup"])
     async def sober_up_command(self, ctx: commands.Context):
         """Order water to help sober up."""
         await self.order_drink(ctx, "water")
 
-    @commands.command(name="drinkbuy", aliases=["buydrink", "giftdrink"])
+    @commands.command(name="drink-buy", aliases=["buy-drink", "gift-drink", "drinkbuy", "buydrink", "giftdrink"])
     async def buy_drink_for_user(self, ctx: commands.Context, member: discord.Member = None, drink_key: str = None):
         """Buy a drink for another user."""
         if not member or not drink_key:
             embed = await self.create_bar_embed("🍻 Buy a Drink for Someone", discord.Color.blue())
-            embed.description = "Buy a drink for a friend!\n\n**Usage:** `~drinkbuy @user <drink>`\n**Example:** `~drinkbuy @John beer`"
+            embed.description = "Buy a drink for a friend!\n\n**Usage:** `~drink-buy @user <drink>`\n**Example:** `~drink-buy @John beer`"
             embed.add_field(
                 name="💡 Tip",
                 value="Use `~drink` to see available drinks and prices",
