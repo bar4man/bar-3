@@ -7,6 +7,7 @@ import asyncio
 import json
 from datetime import datetime, timezone, timedelta
 import webserver
+import re # <-- ADDED IMPORT
 
 # ---------------- Setup ----------------
 load_dotenv()
@@ -244,6 +245,10 @@ class SecurityManager:
             r"sh\s+",
             r"cmd\s+",
             r"powershell\s+",
+            r"<script.*?>", # <-- ADDED from security.py
+            r"javascript:",  # <-- ADDED from security.py
+            r"onload\s*=",    # <-- ADDED from security.py
+            r"onerror\s*=",    # <-- ADDED from security.py
         ]
     
     def validate_input(self, input_str: str, max_length: int = 1000) -> bool:
@@ -252,7 +257,6 @@ class SecurityManager:
             return False
         
         # Check for suspicious patterns
-        import re
         for pattern in self.suspicious_patterns:
             if re.search(pattern, input_str, re.IGNORECASE):
                 logging.warning(f"🚨 Suspicious input detected: {input_str[:100]}...")
@@ -262,10 +266,37 @@ class SecurityManager:
     
     def sanitize_username(self, username: str) -> str:
         """Sanitize username for safe display."""
-        import re
         # Remove or escape potentially dangerous characters
         sanitized = re.sub(r'[<>"\'&]', '', username)
         return sanitized[:32]  # Limit length
+
+    # --- FUNCTIONS MERGED FROM security.py ---
+    
+    def validate_amount(self, amount: int, max_amount: int = 10_000_000) -> bool:
+        """Validate monetary amounts for security."""
+        try:
+            amount_int = int(amount)
+            return 0 < amount_int <= max_amount
+        except (ValueError, TypeError):
+            return False
+    
+    def sanitize_reason(self, reason: str, max_length: int = 500) -> str:
+        """Sanitize moderation reasons."""
+        if not reason:
+            return "No reason provided"
+        
+        # Remove dangerous content
+        dangerous_patterns = ["```", "`", "@everyone", "@here", "http://", "https://", "discord.gg/"]
+        sanitized = reason
+        
+        for pattern in dangerous_patterns:
+            sanitized = sanitized.replace(pattern, "")
+        
+        # Limit length
+        if len(sanitized) > max_length:
+            sanitized = sanitized[:max_length-3] + "..."
+        
+        return sanitized.strip()
 
 # ---------------- Create Manager Instances ----------------
 config_manager = ConfigManager()
@@ -466,7 +497,13 @@ async def _clean_channel(channel, settings):
     max_age = settings.get("max_age")
     if max_age:
         for msg in messages:
-            age_seconds = (now - msg.created_at).total_seconds()
+            # FIX for offset-naive and offset-aware datetimes
+            if msg.created_at.tzinfo is None:
+                msg_time = msg.created_at.replace(tzinfo=timezone.utc)
+            else:
+                msg_time = msg.created_at
+                
+            age_seconds = (now - msg_time).total_seconds()
             if age_seconds > max_age:
                 try:
                     await msg.delete()
@@ -491,6 +528,7 @@ async def _clean_channel(channel, settings):
                 logging.warning(f"Error deleting excess message: {e}")
     
     return deleted_count
+
 
 @auto_cleaner.before_loop
 async def before_auto_cleaner():
