@@ -7,9 +7,6 @@ import asyncio
 import json
 from datetime import datetime, timezone, timedelta
 import webserver
-import aiofiles
-from config.constants import SecurityConfig
-from security import security_manager
 
 # ---------------- Setup ----------------
 load_dotenv()
@@ -45,11 +42,17 @@ intents.message_content = True
 intents.members = True
 intents.guilds = True
 
-# ---------------- Manager Classes ----------------
+# ---------------- Security Constants ----------------
+class SecurityConfig:
+    SPAM_LIMIT = 5
+    SPAM_TIMEFRAME = 5  # seconds
+    MAX_TRACKED_USERS = 1000
+    CLEANUP_INTERVAL = 60  # seconds
+
+# ---------------- Manager Classes (Define FIRST) ----------------
 class ConfigManager:
     def __init__(self, filename="config.json"):
         self.filename = filename
-        self.lock = asyncio.Lock()
         self.default_config = {
             "auto_delete": {},
             "autorole": None,
@@ -59,50 +62,40 @@ class ConfigManager:
             "allowed_channels": [],
             "mod_log_channel": None
         }
-        # Remove the asyncio.create_task call from __init__
-        # We'll handle config creation when it's first needed
+        # Create config file synchronously
+        self._ensure_config_exists()
     
-    async def ensure_config_exists(self):
-        """Async config file creation - call this when needed."""
+    def _ensure_config_exists(self):
+        """Sync config file creation."""
         try:
-            async with self.lock:
-                try:
-                    async with aiofiles.open(self.filename, "r") as f:
-                        await f.read()  # Just check if file exists and is readable
-                except FileNotFoundError:
-                    async with aiofiles.open(self.filename, "w") as f:
-                        await f.write(json.dumps(self.default_config, indent=2, ensure_ascii=False))
-                    logging.info(f"Created new config file: {self.filename}")
+            if not os.path.exists(self.filename):
+                with open(self.filename, "w") as f:
+                    json.dump(self.default_config, f, indent=2, ensure_ascii=False)
+                logging.info(f"Created new config file: {self.filename}")
         except Exception as e:
             logging.error(f"Config creation error: {e}")
     
     async def load(self):
         """Load configuration from file with error recovery."""
-        # Ensure config exists before loading
-        await self.ensure_config_exists()
-        
-        async with self.lock:
-            try:
-                async with aiofiles.open(self.filename, "r") as f:
-                    content = await f.read()
-                    config = json.loads(content)
-                return {**self.default_config, **config}
-            except (FileNotFoundError, json.JSONDecodeError) as e:
-                logging.error(f"Config load error: {e}, using defaults")
-                return self.default_config.copy()
+        try:
+            with open(self.filename, "r") as f:
+                config = json.load(f)
+            return {**self.default_config, **config}
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            logging.error(f"Config load error: {e}, using defaults")
+            return self.default_config.copy()
     
     async def save(self, data):
         """Save configuration to file with validation."""
-        async with self.lock:
-            try:
-                validated_data = {**self.default_config, **data}
-                async with aiofiles.open(self.filename, "w") as f:
-                    await f.write(json.dumps(validated_data, indent=2, ensure_ascii=False))
-                logging.info("Config saved successfully")
-                return True
-            except Exception as e:
-                logging.error(f"Config save error: {e}")
-                return False
+        try:
+            validated_data = {**self.default_config, **data}
+            with open(self.filename, "w") as f:
+                json.dump(validated_data, f, indent=2, ensure_ascii=False)
+            logging.info("Config saved successfully")
+            return True
+        except Exception as e:
+            logging.error(f"Config save error: {e}")
+            return False
 
 class MessageFilter:
     def __init__(self):
@@ -112,12 +105,16 @@ class MessageFilter:
         self._last_cleanup = datetime.now(timezone.utc).timestamp()
         self._cleanup_interval = SecurityConfig.CLEANUP_INTERVAL
         self._max_tracker_size = SecurityConfig.MAX_TRACKED_USERS
-        self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
+        self._cleanup_task = None
         logging.info("✅ Message filter initialized with memory leak protection")
     
-    def __del__(self):
-        """Cleanup when object is destroyed."""
-        if hasattr(self, '_cleanup_task'):
+    def start_cleanup_task(self):
+        """Start cleanup task when bot is ready."""
+        self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
+    
+    def stop_cleanup_task(self):
+        """Stop cleanup task when bot shuts down."""
+        if self._cleanup_task:
             self._cleanup_task.cancel()
     
     async def _periodic_cleanup(self):
@@ -210,7 +207,11 @@ class MessageFilter:
             with open("filter.json", "r") as f:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
-            return {"blocked_links": [], "blocked_words": []}
+            # Create default filter file
+            default_filter = {"blocked_links": [], "blocked_words": []}
+            with open("filter.json", "w") as f:
+                json.dump(default_filter, f, indent=2)
+            return default_filter
     
     def contains_blocked_content(self, content):
         """Check if message contains blocked words or links."""
@@ -227,11 +228,51 @@ class MessageFilter:
         
         return False, None
 
+# ---------------- Security Manager ----------------
+class SecurityManager:
+    def __init__(self):
+        self.suspicious_patterns = [
+            r"\b(admin|root|system)\b.*\b(password|passwd|pwd)\b",
+            r"eval\s*\(",
+            r"exec\s*\(",
+            r"__import__",
+            r"subprocess",
+            r"os\.system",
+            r"curl\s+",
+            r"wget\s+",
+            r"bash\s+",
+            r"sh\s+",
+            r"cmd\s+",
+            r"powershell\s+",
+        ]
+    
+    def validate_input(self, input_str: str, max_length: int = 1000) -> bool:
+        """Validate user input for potential security issues."""
+        if not input_str or len(input_str) > max_length:
+            return False
+        
+        # Check for suspicious patterns
+        import re
+        for pattern in self.suspicious_patterns:
+            if re.search(pattern, input_str, re.IGNORECASE):
+                logging.warning(f"🚨 Suspicious input detected: {input_str[:100]}...")
+                return False
+        
+        return True
+    
+    def sanitize_username(self, username: str) -> str:
+        """Sanitize username for safe display."""
+        import re
+        # Remove or escape potentially dangerous characters
+        sanitized = re.sub(r'[<>"\'&]', '', username)
+        return sanitized[:32]  # Limit length
+
 # ---------------- Create Manager Instances ----------------
 config_manager = ConfigManager()
 message_filter = MessageFilter()
+security_manager = SecurityManager()
 
-# ---------------- Bot Class ----------------
+# ---------------- Bot Class (Define AFTER managers) ----------------
 class Bot(commands.Bot):
     """Custom bot class with additional utilities."""
     
@@ -252,6 +293,9 @@ class Bot(commands.Bot):
         logging.info(f"✅ Bot is ready as {self.user} (ID: {self.user.id})")
         logging.info(f"📊 Connected to {len(self.guilds)} guild(s)")
         
+        # Start cleanup task now that event loop is running
+        self.message_filter.start_cleanup_task()
+        
         # Set bot status
         await self.change_presence(
             activity=discord.Activity(
@@ -260,6 +304,11 @@ class Bot(commands.Bot):
             ),
             status=discord.Status.online
         )
+    
+    async def close(self):
+        """Clean up when bot shuts down."""
+        self.message_filter.stop_cleanup_task()
+        await super().close()
 
 # Create bot instance AFTER everything is defined
 bot = Bot()
@@ -894,14 +943,6 @@ async def load_cogs():
     
     for cog in cogs:
         try:
-            if cog == "economy":
-                try:
-                    import aiofiles
-                    logging.info("✅ aiofiles dependency available for economy system")
-                except ImportError:
-                    logging.error("❌ aiofiles not installed. Economy features will be limited.")
-                    continue
-            
             await bot.load_extension(cog)
             logging.info(f"✅ Loaded cog: {cog}")
             loaded_count += 1
@@ -931,9 +972,17 @@ async def setup_hook():
     """Enhanced setup hook with data directory initialization."""
     logging.info("🔧 Starting bot setup...")
     
-    os.makedirs("data", exist_ok=True)
-    os.makedirs("backups", exist_ok=True)
-    logging.info("📁 Data directories initialized")
+    # Create necessary files in main directory
+    required_files = {
+        "config.json": json.dumps(config_manager.default_config, indent=2),
+        "filter.json": json.dumps({"blocked_links": [], "blocked_words": []}, indent=2)
+    }
+    
+    for filename, default_content in required_files.items():
+        if not os.path.exists(filename):
+            with open(filename, "w") as f:
+                f.write(default_content)
+            logging.info(f"📁 Created {filename}")
     
     await load_cogs()
     auto_cleaner.start()
@@ -1020,4 +1069,3 @@ if __name__ == "__main__":
         logging.critical("❌ Invalid Discord token")
     except Exception as e:
         logging.critical(f"❌ Failed to start bot: {e}")
-
