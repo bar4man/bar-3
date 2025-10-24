@@ -7,7 +7,6 @@ import asyncio
 import json
 from datetime import datetime, timezone, timedelta
 import webserver
-from constants import SecurityConfig
 
 # ---------------- Setup ----------------
 load_dotenv()
@@ -42,6 +41,13 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 intents.guilds = True
+
+# ---------------- Security Constants ----------------
+class SecurityConfig:
+    SPAM_LIMIT = 5
+    SPAM_TIMEFRAME = 5  # seconds
+    MAX_TRACKED_USERS = 1000
+    CLEANUP_INTERVAL = 60  # seconds
 
 # ---------------- Manager Classes (Define FIRST) ----------------
 class ConfigManager:
@@ -102,7 +108,7 @@ class MessageFilter:
         self._cleanup_task = None
         logging.info("✅ Message filter initialized with memory leak protection")
     
-    def start_cleanup_task(self):
+    async def start_cleanup_task(self):
         """Start cleanup task when bot is ready."""
         self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
     
@@ -288,7 +294,7 @@ class Bot(commands.Bot):
         logging.info(f"📊 Connected to {len(self.guilds)} guild(s)")
         
         # Start cleanup task now that event loop is running
-        self.message_filter.start_cleanup_task()
+        await self.message_filter.start_cleanup_task()
         
         # Set bot status
         await self.change_presence(
@@ -982,6 +988,20 @@ async def setup_hook():
     auto_cleaner.start()
     
     logging.info("✅ Setup hook completed")
+
+@bot.event
+async def on_ready():
+    """Enhanced on_ready with more detailed startup info."""
+    logging.info(f"✅ Bot is ready as {bot.user} (ID: {bot.user.id})")
+    logging.info(f"📊 Connected to {len(bot.guilds)} guild(s)")
+    
+    await bot.change_presence(
+        activity=discord.Activity(
+            type=discord.ActivityType.watching,
+            name="~help | Economy & Bar"
+        ),
+        status=discord.Status.online
+    )
 
 @bot.event
 async def on_guild_join(guild):
