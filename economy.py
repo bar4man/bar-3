@@ -113,10 +113,9 @@ class MongoDB:
     
     def _get_user_lock(self, user_id: int):
         """Get or create a lock for a specific user."""
-        async with self._lock:
-            if user_id not in self._locks:
-                self._locks[user_id] = asyncio.Lock()
-            return self._locks[user_id]
+        if user_id not in self._locks:
+            self._locks[user_id] = asyncio.Lock()
+        return self._locks[user_id]
     
     async def initialize_collections(self):
         """Initialize collections with default data."""
