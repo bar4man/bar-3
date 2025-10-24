@@ -291,14 +291,14 @@ class MongoDB:
         for version in range(current_version, self._current_schema_version):
             migration_func = migrations.get(version)
             if migration_func:
-                user = await migration_func(user)
+                user = migration_func(user)  # FIXED: Removed await for sync function
         
         user["_schema_version"] = self._current_schema_version
         await self.update_user(user["user_id"], user)
         
         return user
     
-    async def _migrate_v1_to_v2(self, user: Dict) -> Dict:
+    def _migrate_v1_to_v2(self, user: Dict) -> Dict:
         """Migrate from schema v1 to v2."""
         default_user = self._get_default_user(int(user["user_id"]))
         
