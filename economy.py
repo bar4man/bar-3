@@ -10,33 +10,7 @@ from typing import Optional, Dict, List, Tuple
 import math
 import aiofiles
 import json
-
-# ---------------- Configuration Constants ----------------
-class EconomyConfig:
-    # Wallet and Bank
-    DEFAULT_WALLET_LIMIT = 50000
-    DEFAULT_BANK_LIMIT = 500000
-    MAX_WALLET_LIMIT = 10_000_000
-    MAX_BANK_LIMIT = 100_000_000
-    
-    # Money Values
-    STARTING_MONEY = 100
-    DAILY_MIN = 1000
-    DAILY_MAX = 2000
-    DAILY_STREAK_BONUS = 100
-    MAX_DAILY_STREAK = 7
-    
-    # Work System
-    WORK_COOLDOWN = 3600  # 1 hour
-    WORK_MIN_EARN = 80
-    WORK_MAX_EARN = 600
-    WORK_CRITICAL_CHANCE = 0.1
-    
-    # Begging System
-    BEG_COOLDOWN = 300  # 5 minutes
-    BEG_MIN = 10
-    BEG_MAX = 70
-    BEG_SUCCESS_RATE = 0.8
+from constants import EconomyConfig
 
 # ---------------- Backup Manager ----------------
 class BackupManager:
@@ -1004,7 +978,7 @@ class Economy(commands.Cog):
         """Get available jobs based on user tier."""
         base_jobs = {
             "beginner": {
-                "delivered packages": (EconomyConfig.WORK_MIN_EARN, EconomyConfig.WORK_MIN_Earn + 80),
+                "delivered packages": (EconomyConfig.WORK_MIN_EARN, EconomyConfig.WORK_MIN_EARN + 80),
                 "worked at a café": (EconomyConfig.WORK_MIN_EARN - 20, EconomyConfig.WORK_MIN_EARN + 40),
                 "helped with chores": (EconomyConfig.WORK_MIN_EARN - 40, EconomyConfig.WORK_MIN_EARN + 20)
             },
