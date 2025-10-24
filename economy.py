@@ -9,20 +9,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, List, Tuple
 import math
 import json
+from constants import EconomyConfig  # <-- ADDED IMPORT
 
-# ---------------- Economy Configuration ----------------
-class EconomyConfig:
-    STARTING_MONEY = 1000
-    DEFAULT_WALLET_LIMIT = 50000
-    DEFAULT_BANK_LIMIT = 100000
-    WORK_COOLDOWN = 3600  # 1 hour
-    WORK_MIN_EARN = 50
-    WORK_MAX_EARN = 500
-    WORK_CRITICAL_CHANCE = 0.1
-    DAILY_COOLDOWN = 86400  # 24 hours
-    DAILY_MIN = 100
-    DAILY_MAX = 1000
-    DAILY_STREAK_BONUS = 0.1  # 10% bonus per streak
+# ---------------- Economy Configuration (REMOVED) ----------------
+# All constants are now in constants.py
 
 # ---------------- Backup Manager ----------------
 class BackupManager:
