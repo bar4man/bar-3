@@ -477,5 +477,33 @@ class MarketCog(commands.Cog):
                 # Send market close announcement with daily summary
                 await self.send_market_announcement("🔔 **Market Closed**\nTrading has ended for the day.")
     
-    @tasks.loop(minutes=30)
-    async def announce_market_news(self
+     @tasks.loop(minutes=30)
+    async def announce_market_news(self):
+        """Announce market news periodically."""
+        if self.announcement_channel_id and self.market.market_open:
+            try:
+                channel = self.bot.get_channel(self.announcement_channel_id)
+                if channel and isinstance(channel, discord.TextChannel):
+                    # Only announce if there are significant news events
+                    significant_events = [event for event in self.market.news_events if abs(event["impact"]) > 0.1]
+                    
+                    if significant_events:
+                        embed = discord.Embed(
+                            title="📰 Market News Update",
+                            color=discord.Color.blue(),
+                            timestamp=datetime.now(timezone.utc)
+                        )
+                        
+                        for event in significant_events[:3]:  # Max 3 events
+                            impact_emoji = "📈" if event["impact"] > 0 else "📉"
+                            embed.add_field(
+                                name=f"{impact_emoji} {event['type'].title()} News",
+                                value=event["text"],
+                                inline=False
+                            )
+                        
+                        embed.set_footer(text="Market news may affect stock and gold prices")
+                        await channel.send(embed=embed)
+                        
+            except Exception as e:
+                logging.error(f"Error announcing market news: {e}")
