@@ -10,7 +10,20 @@ from typing import Optional, Dict, List, Tuple
 import math
 import aiofiles
 import json
-from constants import EconomyConfig
+
+# ---------------- Economy Configuration ----------------
+class EconomyConfig:
+    STARTING_MONEY = 1000
+    DEFAULT_WALLET_LIMIT = 50000
+    DEFAULT_BANK_LIMIT = 100000
+    WORK_COOLDOWN = 3600  # 1 hour
+    WORK_MIN_EARN = 50
+    WORK_MAX_EARN = 500
+    WORK_CRITICAL_CHANCE = 0.1
+    DAILY_COOLDOWN = 86400  # 24 hours
+    DAILY_MIN = 100
+    DAILY_MAX = 1000
+    DAILY_STREAK_BONUS = 0.1  # 10% bonus per streak
 
 # ---------------- Backup Manager ----------------
 class BackupManager:
@@ -181,46 +194,6 @@ class MongoDB:
                             "effect": {"bank_limit": 500000},
                             "emoji": "🎯",
                             "stock": -1
-                        },
-                        {
-                            "id": 7,
-                            "name": "🎩 Lucky Hat",
-                            "description": "Increases daily reward by 20% for 7 days",
-                            "price": 3000,
-                            "type": "consumable",
-                            "effect": {"daily_bonus": 1.2, "duration": 7},
-                            "emoji": "🎩",
-                            "stock": -1
-                        },
-                        {
-                            "id": 8,
-                            "name": "🍀 Lucky Charm",
-                            "description": "Increases work earnings by 30% for 5 days",
-                            "price": 2500,
-                            "type": "consumable",
-                            "effect": {"work_bonus": 1.3, "duration": 5},
-                            "emoji": "🍀",
-                            "stock": -1
-                        },
-                        {
-                            "id": 9,
-                            "name": "🎁 Mystery Box",
-                            "description": "Get a random amount of money between 500-5000£",
-                            "price": 1000,
-                            "type": "consumable", 
-                            "effect": {"mystery_box": True},
-                            "emoji": "🎁",
-                            "stock": -1
-                        },
-                        {
-                            "id": 10,
-                            "name": "🎲 Lucky Dice",
-                            "description": "Increases gambling win chance by 10% for 3 uses",
-                            "price": 1500,
-                            "type": "consumable",
-                            "effect": {"gambling_bonus": 1.1, "uses": 3},
-                            "emoji": "🎲",
-                            "stock": -1
                         }
                     ],
                     "created_at": datetime.now()
@@ -291,7 +264,7 @@ class MongoDB:
             return self._get_default_user(user_id)
         
         try:
-            user = await self.db.users.find_one({"user_id": user_id})
+            user = await self.db.users.find_one({"user_id": str(user_id)})
             
             if not user:
                 user = self._get_default_user(user_id)
@@ -315,7 +288,6 @@ class MongoDB:
         # Migration path
         migrations = {
             1: self._migrate_v1_to_v2,
-            # Add future migrations here: 2: self._migrate_v2_to_v3
         }
         
         for version in range(current_version, self._current_schema_version):
@@ -330,7 +302,7 @@ class MongoDB:
     
     async def _migrate_v1_to_v2(self, user: Dict) -> Dict:
         """Migrate from schema v1 to v2."""
-        default_user = self._get_default_user(user["user_id"])
+        default_user = self._get_default_user(int(user["user_id"]))
         
         # Add missing fields
         for key, value in default_user.items():
@@ -339,22 +311,10 @@ class MongoDB:
         
         return user
     
-    def _ensure_user_schema(self, user: Dict) -> Dict:
-        """Ensure user has all required fields for backward compatibility."""
-        default_user = self._get_default_user(user["user_id"])
-        
-        # Add any missing fields with default values
-        for key, value in default_user.items():
-            if key not in user:
-                user[key] = value
-                logging.info(f"🔄 Added missing field '{key}' to user {user['user_id']}")
-        
-        return user
-    
     def _get_default_user(self, user_id: int) -> Dict:
         """Return default user structure."""
         return {
-            "user_id": user_id,
+            "user_id": str(user_id),
             "wallet": EconomyConfig.STARTING_MONEY,
             "wallet_limit": EconomyConfig.DEFAULT_WALLET_LIMIT,
             "bank": 0,
@@ -395,7 +355,7 @@ class MongoDB:
             
         update_data["last_active"] = datetime.now()
         await self.db.users.update_one(
-            {"user_id": user_id},
+            {"user_id": str(user_id)},
             {"$set": update_data},
             upsert=True
         )
@@ -472,7 +432,7 @@ class MongoDB:
                 update_data["$inc"] = {"total_earned": actual_wallet_change + actual_bank_change}
             
             result = await self.db.users.find_one_and_update(
-                {"user_id": user_id},
+                {"user_id": str(user_id)},
                 update_data,
                 return_document=True,
                 upsert=True
@@ -537,7 +497,7 @@ class MongoDB:
             
         try:
             cooldown = await self.db.cooldowns.find_one({
-                "user_id": user_id,
+                "user_id": str(user_id),
                 "command": command
             })
             
@@ -560,7 +520,7 @@ class MongoDB:
             
         try:
             await self.db.cooldowns.update_one(
-                {"user_id": user_id, "command": command},
+                {"user_id": str(user_id), "command": command},
                 {
                     "$set": {
                         "created_at": datetime.now(),
@@ -581,20 +541,20 @@ class MongoDB:
         try:
             # Check if user already has this item (for stackable items)
             existing_item = await self.db.inventory.find_one({
-                "user_id": user_id,
+                "user_id": str(user_id),
                 "item_id": item["id"]
             })
             
             if existing_item and item.get("stackable", False):
                 # Update quantity for stackable items
                 await self.db.inventory.update_one(
-                    {"user_id": user_id, "item_id": item["id"]},
+                    {"user_id": str(user_id), "item_id": item["id"]},
                     {"$inc": {"quantity": 1}}
                 )
             else:
                 # Add new item
                 inventory_item = {
-                    "user_id": user_id,
+                    "user_id": str(user_id),
                     "item_id": item["id"],
                     "name": item["name"],
                     "type": item["type"],
@@ -614,7 +574,7 @@ class MongoDB:
             return []
             
         try:
-            cursor = self.db.inventory.find({"user_id": user_id})
+            cursor = self.db.inventory.find({"user_id": str(user_id)})
             return await cursor.to_list(length=100)
         except Exception as e:
             logging.error(f"❌ Error getting inventory for user {user_id}: {e}")
@@ -626,7 +586,7 @@ class MongoDB:
             return None
             
         try:
-            return await self.db.inventory.find_one({"user_id": user_id, "item_id": item_id})
+            return await self.db.inventory.find_one({"user_id": str(user_id), "item_id": item_id})
         except Exception as e:
             logging.error(f"❌ Error getting inventory item for user {user_id}: {e}")
             return None
@@ -644,18 +604,18 @@ class MongoDB:
             if item.get("quantity", 1) > 1:
                 # Decrement quantity for stackable items
                 await self.db.inventory.update_one(
-                    {"user_id": user_id, "item_id": item_id},
+                    {"user_id": str(user_id), "item_id": item_id},
                     {"$inc": {"quantity": -1}}
                 )
             elif item.get("uses_remaining") and item["uses_remaining"] > 1:
                 # Decrement uses for multi-use items
                 await self.db.inventory.update_one(
-                    {"user_id": user_id, "item_id": item_id},
+                    {"user_id": str(user_id), "item_id": item_id},
                     {"$inc": {"uses_remaining": -1}}
                 )
             else:
                 # Remove single-use items
-                await self.db.inventory.delete_one({"user_id": user_id, "item_id": item_id})
+                await self.db.inventory.delete_one({"user_id": str(user_id), "item_id": item_id})
             
             return True
         except Exception as e:
@@ -669,7 +629,7 @@ class MongoDB:
             
         try:
             await self.db.inventory.update_one(
-                {"user_id": user_id, "item_id": item_id},
+                {"user_id": str(user_id), "item_id": item_id},
                 {"$set": update_data}
             )
         except Exception as e:
@@ -720,26 +680,6 @@ class MongoDB:
                 "id": 6, "name": "🎯 Large Bank Upgrade", "price": 50000,
                 "description": "Increase your bank limit by 500,000£",
                 "type": "upgrade", "effect": {"bank_limit": 500000}, "emoji": "🎯", "stock": -1
-            },
-            {
-                "id": 7, "name": "🎩 Lucky Hat", "price": 3000,
-                "description": "Increases daily reward by 20% for 7 days",
-                "type": "consumable", "effect": {"daily_bonus": 1.2, "duration": 7}, "emoji": "🎩", "stock": -1
-            },
-            {
-                "id": 8, "name": "🍀 Lucky Charm", "price": 2500,
-                "description": "Increases work earnings by 30% for 5 days",
-                "type": "consumable", "effect": {"work_bonus": 1.3, "duration": 5}, "emoji": "🍀", "stock": -1
-            },
-            {
-                "id": 9, "name": "🎁 Mystery Box", "price": 1000,
-                "description": "Get a random amount of money between 500-5000£",
-                "type": "consumable", "effect": {"mystery_box": True}, "emoji": "🎁", "stock": -1
-            },
-            {
-                "id": 10, "name": "🎲 Lucky Dice", "price": 1500,
-                "description": "Increases gambling win chance by 10% for 3 uses",
-                "type": "consumable", "effect": {"gambling_bonus": 1.1, "uses": 3}, "emoji": "🎲", "stock": -1
             }
         ]
     
@@ -1039,8 +979,6 @@ class Economy(commands.Cog):
         
         await ctx.send(embed=embed)
 
-    # ... (rest of the commands remain the same but will use the new atomic operations)
-
     @commands.command(name="work")
     async def work(self, ctx: commands.Context):
         """Work to earn money with balanced rewards based on net worth."""
@@ -1148,9 +1086,6 @@ class Economy(commands.Cog):
         embed.set_footer(text=f"Transaction completed at {datetime.now().strftime('%H:%M:%S')}")
         
         await ctx.send(embed=embed)
-
-# The rest of the commands (deposit, withdraw, upgrade, daily, etc.) would be updated similarly
-# to use the new atomic operations and include overflow protection messages
 
 async def setup(bot):
     await bot.add_cog(Economy(bot))
