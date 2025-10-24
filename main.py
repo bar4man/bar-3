@@ -8,6 +8,8 @@ import json
 from datetime import datetime, timezone, timedelta
 import webserver
 import aiofiles
+from config.constants import SecurityConfig
+from security import security_manager
 
 # ---------------- Setup ----------------
 load_dotenv()
@@ -43,14 +45,7 @@ intents.message_content = True
 intents.members = True
 intents.guilds = True
 
-# ---------------- Security Constants ----------------
-class SecurityConfig:
-    SPAM_LIMIT = 5
-    SPAM_TIMEFRAME = 5  # seconds
-    MAX_TRACKED_USERS = 1000
-    CLEANUP_INTERVAL = 60  # seconds
-
-# ---------------- Manager Classes (Define FIRST) ----------------
+# ---------------- Manager Classes ----------------
 class ConfigManager:
     def __init__(self, filename="config.json"):
         self.filename = filename
@@ -228,51 +223,11 @@ class MessageFilter:
         
         return False, None
 
-# ---------------- Security Manager ----------------
-class SecurityManager:
-    def __init__(self):
-        self.suspicious_patterns = [
-            r"\b(admin|root|system)\b.*\b(password|passwd|pwd)\b",
-            r"eval\s*\(",
-            r"exec\s*\(",
-            r"__import__",
-            r"subprocess",
-            r"os\.system",
-            r"curl\s+",
-            r"wget\s+",
-            r"bash\s+",
-            r"sh\s+",
-            r"cmd\s+",
-            r"powershell\s+",
-        ]
-    
-    def validate_input(self, input_str: str, max_length: int = 1000) -> bool:
-        """Validate user input for potential security issues."""
-        if not input_str or len(input_str) > max_length:
-            return False
-        
-        # Check for suspicious patterns
-        import re
-        for pattern in self.suspicious_patterns:
-            if re.search(pattern, input_str, re.IGNORECASE):
-                logging.warning(f"🚨 Suspicious input detected: {input_str[:100]}...")
-                return False
-        
-        return True
-    
-    def sanitize_username(self, username: str) -> str:
-        """Sanitize username for safe display."""
-        import re
-        # Remove or escape potentially dangerous characters
-        sanitized = re.sub(r'[<>"\'&]', '', username)
-        return sanitized[:32]  # Limit length
-
 # ---------------- Create Manager Instances ----------------
 config_manager = ConfigManager()
 message_filter = MessageFilter()
-security_manager = SecurityManager()
 
-# ---------------- Bot Class (Define AFTER managers) ----------------
+# ---------------- Bot Class ----------------
 class Bot(commands.Bot):
     """Custom bot class with additional utilities."""
     
