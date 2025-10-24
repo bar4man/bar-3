@@ -59,10 +59,11 @@ class ConfigManager:
             "allowed_channels": [],
             "mod_log_channel": None
         }
-        asyncio.create_task(self._ensure_config_exists())
+        # Remove the asyncio.create_task call from __init__
+        # We'll handle config creation when it's first needed
     
-    async def _ensure_config_exists(self):
-        """Async config file creation."""
+    async def ensure_config_exists(self):
+        """Async config file creation - call this when needed."""
         try:
             async with self.lock:
                 try:
@@ -77,6 +78,9 @@ class ConfigManager:
     
     async def load(self):
         """Load configuration from file with error recovery."""
+        # Ensure config exists before loading
+        await self.ensure_config_exists()
+        
         async with self.lock:
             try:
                 async with aiofiles.open(self.filename, "r") as f:
@@ -1016,3 +1020,4 @@ if __name__ == "__main__":
         logging.critical("❌ Invalid Discord token")
     except Exception as e:
         logging.critical(f"❌ Failed to start bot: {e}")
+
