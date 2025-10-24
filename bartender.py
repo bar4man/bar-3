@@ -6,33 +6,10 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
 from economy import db
+from constants import BartenderConfig  # <-- ADDED IMPORT
 
-# ---------------- Bartender Configuration Constants ----------------
-class BartenderConfig:
-    # Intoxication System
-    MAX_INTOXICATION = 10
-    SOBERING_RATE = 1  # points per 5 minutes
-    INTOXICATION_WARNING_LEVEL = 5
-    INTOXICATION_DANGER_LEVEL = 8
-    FORCE_SOBER_LEVEL = 9
-    
-    # Drink Cooldowns (seconds)
-    DRINK_COOLDOWN = 30  # Same drink type
-    DRINK_GLOBAL_COOLDOWN = 10  # Any drink
-    SOBER_UP_COOLDOWN = 300  # 5 minutes
-    
-    # Drink Effects
-    MAX_MOOD_BOOST = 3
-    SOBERING_DRINKS = ["water"]
-    STRONG_DRINKS = ["whiskey", "vodka", "oldfashioned", "martini"]
-    
-    # Price Ranges
-    MIN_DRINK_PRICE = 20
-    MAX_DRINK_PRICE = 500
-    
-    # Security
-    MAX_DRINK_ORDER_AMOUNT = 10
-    GIFT_COOLDOWN = 60  # seconds between gifts
+# ---------------- Bartender Configuration Constants (REMOVED) ----------------
+# All constants are now in constants.py
 
 # ---------------- Bartender Security Manager ----------------
 class BartenderSecurityManager:
