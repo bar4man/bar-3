@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 import math
 from economy import db
+from error_handler import ErrorHandler # <-- ADDED IMPORT
 
 # ---------------- Market Configuration ----------------
 class MarketConfig:
@@ -140,7 +141,7 @@ class MarketSystem:
         # Gold market specifics
         self.gold_price = 1850.0  # Starting price per ounce
         self.gold_volatility = 0.015
-        self.gold_demand = 0.0
+        self.gold_demand = 0.0  # <-- This will now be changed by buy/sell
         
         # Stock definitions with more realistic data
         self.stocks = {
@@ -348,10 +349,14 @@ class MarketSystem:
             
         sentiment = self.calculate_market_sentiment()
         
+        # --- FIXED GOLD DEMAND ---
+        # Add demand decay
+        self.gold_demand *= 0.95  # Decays demand by 5% each update
+        
         # Update gold price
         gold_change = random.gauss(0, self.gold_volatility)
         gold_change += sentiment * 0.01  # Market sentiment effect
-        gold_change += self.gold_demand * 0.005  # Demand effect
+        gold_change += self.gold_demand * 0.005  # Demand effect (NOW FUNCTIONAL)
         
         # Apply cached gold news effects
         gold_news_impact = self._news_impact_cache.get("gold", 0)
@@ -375,9 +380,10 @@ class MarketSystem:
             change += sentiment * volatility * 2
             
             # Sector-specific news (optimized using cache)
-            sector_impact = self._news_impact_cache.get(symbol, 0)
-            change += sector_impact
-            
+            sector_impact = self._news_impact_cache.get(symbol, 0) # <-- BUGFIX: was using sector, should be symbol
+            if stock["sector"] in self._news_impact_cache:
+                 change += self._news_impact_cache[stock["sector"]]
+
             # Company-specific factors
             earnings_surprise = random.gauss(0, 0.02)
             change += earnings_surprise
@@ -699,5 +705,145 @@ class MarketCog(commands.Cog):
         embed.set_footer(text="Gold often moves inversely to stock markets during uncertainty")
         await ctx.send(embed=embed)
 
+    # -------------------- NEW TRADING COMMANDS --------------------
+
+    @commands.command(name="buyinvest", aliases=["ibuy"])
+    async def buy_invest(self, ctx: commands.Context, asset_type: str, symbol_or_ounces: str, amount: int):
+        """Buy stocks or gold. Usage: ~buyinvest <stock/gold> <SYMBOL/ounces> <amount>"""
+        try:
+            asset_type = asset_type.lower()
+            
+            if not self.market.market_open and asset_type == "stock":
+                await ErrorHandler.handle_command_error(ctx, Exception("market_closed"), "buyinvest")
+                return
+            
+            if amount <= 0:
+                return await ctx.send("Amount must be greater than 0.")
+                
+            user_data = await db.get_user(ctx.author.id)
+            total_cost = 0
+            
+            if asset_type == "stock":
+                symbol = symbol_or_ounces.upper()
+                if symbol not in self.market.stocks:
+                    return await ctx.send(f"Stock symbol '{symbol}' not found.")
+                
+                # Check portfolio size limit
+                portfolio = user_data.get("portfolio", {})
+                is_valid_size, size_error = self.security_manager.validate_portfolio_size(portfolio, new_symbol=symbol)
+                if not is_valid_size:
+                    return await ctx.send(size_error)
+                
+                stock = self.market.stocks[symbol]
+                total_cost = stock["price"] * amount
+                
+            elif asset_type == "gold":
+                total_cost = self.market.gold_price * amount
+                
+            else:
+                return await ctx.send("Invalid asset type. Use 'stock' or 'gold'.")
+
+            # Check if user has enough in bank
+            if user_data["bank"] < total_cost:
+                return await ctx.send(f"Insufficient funds in bank. You need {total_cost:,.2f}£ but only have {user_data['bank']:,.2f}£.")
+
+            # --- Process Transaction ---
+            # 1. Remove money from bank
+            await db.update_balance_atomic(ctx.author.id, bank_change=-total_cost)
+            
+            # 2. Add asset to portfolio
+            user_portfolio = user_data.get("portfolio", db._get_default_user(0)["portfolio"]) # Get default structure
+            
+            if asset_type == "stock":
+                user_portfolio["stocks"].setdefault(symbol, {"shares": 0, "avg_price": 0.0})
+                
+                # Calculate new average price
+                old_shares = user_portfolio["stocks"][symbol]["shares"]
+                old_avg_price = user_portfolio["stocks"][symbol]["avg_price"]
+                new_shares = old_shares + amount
+                
+                user_portfolio["stocks"][symbol]["avg_price"] = ((old_shares * old_avg_price) + (amount * stock["price"])) / new_shares
+                user_portfolio["stocks"][symbol]["shares"] = new_shares
+                
+                # Update market demand
+                self.market.stocks[symbol]["volume"] += amount
+
+            elif asset_type == "gold":
+                user_portfolio["gold_ounces"] = user_portfolio.get("gold_ounces", 0.0) + amount
+                
+                # --- THIS IS THE FIX for GOLD DEMAND ---
+                self.market.gold_demand += (amount / 1000) # Increase demand (scaled)
+            
+            # 3. Save portfolio back to database
+            await db.update_user(ctx.author.id, {"portfolio": user_portfolio})
+            
+            await ctx.send(f"✅ Successfully purchased {amount:,} {'shares of' if asset_type == 'stock' else 'oz of'} {symbol_or_ounces.upper()} for {total_cost:,.2f}£.")
+
+        except Exception as e:
+            await ErrorHandler.handle_command_error(ctx, e, "buyinvest")
+
+    @commands.command(name="sellinvest", aliases=["isell"])
+    async def sell_invest(self, ctx: commands.Context, asset_type: str, symbol_or_ounces: str, amount: int):
+        """Sell stocks or gold. Usage: ~sellinvest <stock/gold> <SYMBOL/ounces> <amount>"""
+        try:
+            asset_type = asset_type.lower()
+            
+            if not self.market.market_open and asset_type == "stock":
+                await ErrorHandler.handle_command_error(ctx, Exception("market_closed"), "sellinvest")
+                return
+                
+            if amount <= 0:
+                return await ctx.send("Amount must be greater than 0.")
+                
+            user_data = await db.get_user(ctx.author.id)
+            user_portfolio = user_data.get("portfolio", db._get_default_user(0)["portfolio"])
+            total_sale = 0
+            
+            if asset_type == "stock":
+                symbol = symbol_or_ounces.upper()
+                if symbol not in self.market.stocks:
+                    return await ctx.send(f"Stock symbol '{symbol}' not found.")
+                
+                if symbol not in user_portfolio.get("stocks", {}) or user_portfolio["stocks"][symbol]["shares"] < amount:
+                    return await ctx.send(f"You don't own {amount:,} shares of {symbol}.")
+                
+                stock = self.market.stocks[symbol]
+                total_sale = stock["price"] * amount
+                
+                # Update portfolio
+                user_portfolio["stocks"][symbol]["shares"] -= amount
+                if user_portfolio["stocks"][symbol]["shares"] == 0:
+                    del user_portfolio["stocks"][symbol] # Remove if 0 shares
+                
+                # Update market demand
+                self.market.stocks[symbol]["volume"] += amount
+
+            elif asset_type == "gold":
+                if user_portfolio.get("gold_ounces", 0.0) < amount:
+                    return await ctx.send(f"You don't own {amount:,} oz of gold.")
+                
+                total_sale = self.market.gold_price * amount
+                
+                # Update portfolio
+                user_portfolio["gold_ounces"] -= amount
+                
+                # --- THIS IS THE FIX for GOLD DEMAND ---
+                self.market.gold_demand -= (amount / 1000) # Decrease demand (scaled)
+
+            else:
+                return await ctx.send("Invalid asset type. Use 'stock' or 'gold'.")
+
+            # --- Process Transaction ---
+            # 1. Add money to bank
+            await db.update_balance_atomic(ctx.author.id, bank_change=total_sale)
+            
+            # 2. Save portfolio back to database
+            await db.update_user(ctx.author.id, {"portfolio": user_portfolio})
+            
+            await ctx.send(f"✅ Successfully sold {amount:,} {'shares of' if asset_type == 'stock' else 'oz of'} {symbol_or_ounces.upper()} for {total_sale:,.2f}£.")
+
+        except Exception as e:
+            await ErrorHandler.handle_command_error(ctx, e, "sellinvest")
+            
 async def setup(bot):
     await bot.add_cog(MarketCog(bot))
