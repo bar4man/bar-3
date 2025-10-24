@@ -1,5 +1,5 @@
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 import random
 import asyncio
 import logging
@@ -7,176 +7,273 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
 from economy import db
 
+# ---------------- Bartender Configuration Constants ----------------
+class BartenderConfig:
+    # Intoxication System
+    MAX_INTOXICATION = 10
+    SOBERING_RATE = 1  # points per 5 minutes
+    INTOXICATION_WARNING_LEVEL = 5
+    INTOXICATION_DANGER_LEVEL = 8
+    FORCE_SOBER_LEVEL = 9
+    
+    # Drink Cooldowns (seconds)
+    DRINK_COOLDOWN = 30  # Same drink type
+    DRINK_GLOBAL_COOLDOWN = 10  # Any drink
+    SOBER_UP_COOLDOWN = 300  # 5 minutes
+    
+    # Drink Effects
+    MAX_MOOD_BOOST = 3
+    SOBERING_DRINKS = ["water"]
+    STRONG_DRINKS = ["whiskey", "vodka", "oldfashioned", "martini"]
+    
+    # Price Ranges
+    MIN_DRINK_PRICE = 20
+    MAX_DRINK_PRICE = 500
+    
+    # Security
+    MAX_DRINK_ORDER_AMOUNT = 10
+    GIFT_COOLDOWN = 60  # seconds between gifts
+
+# ---------------- Bartender Security Manager ----------------
+class BartenderSecurityManager:
+    """Security manager for bartender system to prevent exploits."""
+    
+    def __init__(self):
+        self.drink_cooldowns = {}
+        self.gift_cooldowns = {}
+        self.rapid_ordering = {}
+    
+    async def check_drink_cooldown(self, user_id: int, drink_key: str) -> tuple[bool, float]:
+        """Check if user can order a drink (cooldown and global cooldown)."""
+        now = datetime.now(timezone.utc).timestamp()
+        
+        # Global cooldown check
+        global_key = f"{user_id}_global"
+        if global_key in self.drink_cooldowns:
+            global_remaining = self.drink_cooldowns[global_key] - now
+            if global_remaining > 0:
+                return False, global_remaining
+        
+        # Specific drink cooldown check
+        drink_key_specific = f"{user_id}_{drink_key}"
+        if drink_key_specific in self.drink_cooldowns:
+            drink_remaining = self.drink_cooldowns[drink_key_specific] - now
+            if drink_remaining > 0:
+                return False, drink_remaining
+        
+        return True, 0
+    
+    def set_drink_cooldown(self, user_id: int, drink_key: str):
+        """Set cooldowns for drink ordering."""
+        now = datetime.now(timezone.utc).timestamp()
+        
+        # Set global cooldown
+        global_key = f"{user_id}_global"
+        self.drink_cooldowns[global_key] = now + BartenderConfig.DRINK_GLOBAL_COOLDOWN
+        
+        # Set specific drink cooldown
+        drink_key_specific = f"{user_id}_{drink_key}"
+        self.drink_cooldowns[drink_key_specific] = now + BartenderConfig.DRINK_COOLDOWN
+        
+        # Clean up old cooldowns periodically
+        self._cleanup_old_cooldowns()
+    
+    async def check_gift_cooldown(self, user_id: int) -> tuple[bool, float]:
+        """Check if user can gift a drink."""
+        now = datetime.now(timezone.utc).timestamp()
+        key = f"{user_id}_gift"
+        
+        if key in self.gift_cooldowns:
+            remaining = self.gift_cooldowns[key] - now
+            if remaining > 0:
+                return False, remaining
+        
+        return True, 0
+    
+    def set_gift_cooldown(self, user_id: int):
+        """Set cooldown for drink gifting."""
+        now = datetime.now(timezone.utc).timestamp()
+        key = f"{user_id}_gift"
+        self.gift_cooldowns[key] = now + BartenderConfig.GIFT_COOLDOWN
+        
+        # Clean up old cooldowns
+        self._cleanup_old_cooldowns()
+    
+    def _cleanup_old_cooldowns(self):
+        """Clean up expired cooldowns to prevent memory leaks."""
+        now = datetime.now(timezone.utc).timestamp()
+        max_age = 3600  # 1 hour
+        
+        # Clean drink cooldowns
+        self.drink_cooldowns = {
+            k: v for k, v in self.drink_cooldowns.items() 
+            if now - v < max_age
+        }
+        
+        # Clean gift cooldowns
+        self.gift_cooldowns = {
+            k: v for k, v in self.gift_cooldowns.items() 
+            if now - v < max_age
+        }
+    
+    def validate_drink_order(self, user_id: int, drink_key: str, quantity: int = 1) -> tuple[bool, str]:
+        """Validate drink order for security and limits."""
+        # Check quantity limits
+        if quantity <= 0:
+            return False, "Quantity must be greater than 0."
+        
+        if quantity > BartenderConfig.MAX_DRINK_ORDER_AMOUNT:
+            return False, f"Cannot order more than {BartenderConfig.MAX_DRINK_ORDER_AMOUNT} drinks at once."
+        
+        # Check for rapid ordering (anti-spam)
+        now = datetime.now(timezone.utc).timestamp()
+        key = f"{user_id}_order"
+        
+        if key not in self.rapid_ordering:
+            self.rapid_ordering[key] = []
+        
+        # Remove old orders (last minute)
+        self.rapid_ordering[key] = [t for t in self.rapid_ordering[key] if now - t < 60]
+        
+        # Check if ordering too rapidly
+        if len(self.rapid_ordering[key]) >= 5:  # Max 5 orders per minute
+            return False, "You're ordering drinks too rapidly. Please slow down."
+        
+        self.rapid_ordering[key].append(now)
+        
+        return True, "OK"
+
 class BartenderCog(commands.Cog):
-    """Enhanced bartender system with 100+ drinks and rude announcements."""
+    """Bartender system with intoxication limits and exploit prevention."""
     
     def __init__(self, bot):
         self.bot = bot
         self.drinks = self._initialize_drinks()
         self.sobering_tasks = {}
-        self.announcement_channel_id = None
-        self.rude_announcements.start()
-        logging.info("✅ Bartender system initialized with 100+ drinks")
+        self.security_manager = BartenderSecurityManager()
+        self._cooldowns = {}
+        logging.info("✅ Bartender system initialized with security features")
     
     def _initialize_drinks(self) -> Dict:
-        """Initialize the drink menu with 100+ drinks."""
-        drinks = {
-            # ========== 🍺 BEERS & ALES (15) ==========
-            "beer": {"name": "🍺 Piss Water Lite", "price": 30, "type": "beer", "rarity": "common", "effects": {"intoxication": 1, "mood_boost": 1}, "description": "Tastes like fermented sadness"},
-            "stout": {"name": "🍺 Sewer Stout", "price": 60, "type": "beer", "rarity": "common", "effects": {"intoxication": 2, "mood_boost": 1}, "description": "Dark like your future"},
-            "ipa": {"name": "🍺 Hoppy Disappointment", "price": 80, "type": "beer", "rarity": "common", "effects": {"intoxication": 2, "mood_boost": 2}, "description": "Bitter, just like you"},
-            "lager": {"name": "🍺 Basic Bitch Lager", "price": 35, "type": "beer", "rarity": "common", "effects": {"intoxication": 1, "mood_boost": 1}, "description": "For people with no personality"},
-            "pilsner": {"name": "🍺 Weak-Ass Pilsner", "price": 45, "type": "beer", "rarity": "common", "effects": {"intoxication": 1, "mood_boost": 1}, "description": "Water with commitment issues"},
-            "ale": {"name": "🍺 Dad Bod Ale", "price": 55, "type": "beer", "rarity": "common", "effects": {"intoxication": 2, "mood_boost": 2}, "description": "For middle-aged disappointments"},
-            "porter": {"name": "🍺 Depresso Porter", "price": 70, "type": "beer", "rarity": "common", "effects": {"intoxication": 2, "mood_boost": 1}, "description": "Dark roast despair"},
-            "wheat": {"name": "🍺 Wheat Failure", "price": 50, "type": "beer", "rarity": "common", "effects": {"intoxication": 1, "mood_boost": 2}, "description": "Cloudy like your judgment"},
-            "sour": {"name": "🍺 Sour Loser", "price": 85, "type": "beer", "rarity": "rare", "effects": {"intoxication": 2, "mood_boost": 3}, "description": "Face-puckering regret"},
-            "bock": {"name": "🍺 Bock of Shame", "price": 75, "type": "beer", "rarity": "common", "effects": {"intoxication": 2, "mood_boost": 2}, "description": "Stronger than your willpower"},
-            "lambic": {"name": "🍺 Lambic Lament", "price": 120, "type": "beer", "rarity": "rare", "effects": {"intoxication": 3, "mood_boost": 3}, "description": "Fancy sadness"},
-            "trappist": {"name": "🍺 Monk's Misery", "price": 150, "type": "beer", "rarity": "epic", "effects": {"intoxication": 3, "mood_boost": 4}, "description": "Divine disappointment"},
-            "session": {"name": "🍺 Session Regret", "price": 40, "type": "beer", "rarity": "common", "effects": {"intoxication": 1, "mood_boost": 1}, "description": "Low alcohol, like your standards"},
-            "imperial": {"name": "🍺 Imperial Failure", "price": 180, "type": "beer", "rarity": "epic", "effects": {"intoxication": 4, "mood_boost": 3}, "description": "For when you really want to ruin your life"},
-            "cider": {"name": "🍺 Apple Abomination", "price": 65, "type": "beer", "rarity": "common", "effects": {"intoxication": 2, "mood_boost": 2}, "description": "For people who can't handle real beer"},
-
-            # ========== 🥃 WHISKEY & BOURBON (15) ==========
-            "whiskey": {"name": "🥃 Regret in a Glass", "price": 200, "type": "whiskey", "rarity": "rare", "effects": {"intoxication": 4, "mood_boost": 2}, "description": "For real alcoholics"},
-            "bourbon": {"name": "🥃 Kentucky Sadness", "price": 220, "type": "whiskey", "rarity": "rare", "effects": {"intoxication": 4, "mood_boost": 3}, "description": "American disappointment"},
-            "scotch": {"name": "🥃 Scottish Sorrow", "price": 300, "type": "whiskey", "rarity": "epic", "effects": {"intoxication": 4, "mood_boost": 4}, "description": "Expensive tears"},
-            "rye": {"name": "🥃 Rye Remorse", "price": 180, "type": "whiskey", "rarity": "rare", "effects": {"intoxication": 3, "mood_boost": 3}, "description": "Spicy regret"},
-            "irish": {"name": "🥃 Irish Depression", "price": 190, "type": "whiskey", "rarity": "rare", "effects": {"intoxication": 3, "mood_boost": 3}, "description": "Potato-based sadness"},
-            "tennessee": {"name": "🥃 Tennessee Tears", "price": 210, "type": "whiskey", "rarity": "rare", "effects": {"intoxication": 4, "mood_boost": 3}, "description": "Filtered through broken dreams"},
-            "singlepot": {"name": "🥃 Single Pot Pity", "price": 350, "type": "whiskey", "rarity": "epic", "effects": {"intoxication": 4, "mood_boost": 5}, "description": "Artisanal misery"},
-            "corn": {"name": "🥃 Corn Liquor Shame", "price": 90, "type": "whiskey", "rarity": "common", "effects": {"intoxication": 3, "mood_boost": 1}, "description": "For true degenerates"},
-            "blended": {"name": "🥃 Blended Bullshit", "price": 120, "type": "whiskey", "rarity": "common", "effects": {"intoxication": 3, "mood_boost": 2}, "description": "Multiple disappointments mixed together"},
-            "smokey": {"name": "🥃 Smokey Failure", "price": 280, "type": "whiskey", "rarity": "epic", "effects": {"intoxication": 4, "mood_boost": 4}, "description": "Tastes like your burnt ambitions"},
-            "canadian": {"name": "🥃 Canadian Apology", "price": 130, "type": "whiskey", "rarity": "common", "effects": {"intoxication": 3, "mood_boost": 2}, "description": "Sorry, not sorry"},
-            "japanese": {"name": "🥃 Japanese Shame", "price": 400, "type": "whiskey", "rarity": "legendary", "effects": {"intoxication": 5, "mood_boost": 5}, "description": "Perfected disappointment"},
-            "moonshine": {"name": "🥃 Blindin' Moonshine", "price": 70, "type": "whiskey", "rarity": "common", "effects": {"intoxication": 5, "mood_boost": 1}, "description": "Might make you go blind, worth it"},
-            "fireball": {"name": "🥃 Basic Bitch Fireball", "price": 60, "type": "whiskey", "rarity": "common", "effects": {"intoxication": 3, "mood_boost": 2}, "description": "For people who can't handle real whiskey"},
-            "aged": {"name": "🥃 Aged Regret", "price": 500, "type": "whiskey", "rarity": "legendary", "effects": {"intoxication": 5, "mood_boost": 6}, "description": "25 years of disappointment"},
-
-            # ========== 🍷 WINE (15) ==========
-            "redwine": {"name": "🍷 Cheap Red Regret", "price": 150, "type": "wine", "rarity": "common", "effects": {"intoxication": 3, "mood_boost": 2}, "description": "For wannabe sommeliers"},
-            "whitewine": {"name": "🍷 Basic White Whine", "price": 140, "type": "wine", "rarity": "common", "effects": {"intoxication": 2, "mood_boost": 3}, "description": "For Karens and divorcées"},
-            "rose": {"name": "🍷 Basic Bitch Rosé", "price": 160, "type": "wine", "rarity": "common", "effects": {"intoxication": 2, "mood_boost": 3}, "description": "Pink disappointment"},
-            "sparkling": {"name": "🍷 Sparkling Failure", "price": 180, "type": "wine", "rarity": "common", "effects": {"intoxication": 2, "mood_boost": 4}, "description": "Bubbles of sadness"},
-            "chardonnay": {"name": "🍷 Chardonnay Shame", "price": 170, "type": "wine", "rarity": "common", "effects": {"intoxication": 3, "mood_boost": 3}, "description": "Buttery tears"},
-            "pinot": {"name": "🍷 Pinot Pretension", "price": 220, "type": "wine", "rarity": "rare", "effects": {"intoxication": 3, "mood_boost": 4}, "description": "For wine snobs"},
-            "cabernet": {"name": "🍷 Cabernet Cringe", "price": 200, "type": "wine", "rarity": "rare", "effects": {"intoxication": 4, "mood_boost": 3}, "description": "Bold failure"},
-            "merlot": {"name": "🍷 Merlot Misery", "price": 190, "type": "wine", "rarity": "common", "effects": {"intoxication": 3, "mood_boost": 3}, "description": "Smooth disappointment"},
-            "zinfandel": {"name": "🍷 Zinfandel Zadness", "price": 210, "type": "wine", "rarity": "rare", "effects": {"intoxication": 3, "mood_boost": 4}, "description": "Fruity failure"},
-            "syrah": {"name": "🍷 Syrah Sorrow", "price": 230, "type": "wine", "rarity": "rare", "effects": {"intoxication": 4, "mood_boost": 3}, "description": "Spicy tears"},
-            "port": {"name": "🍷 Port of Despair", "price": 250, "type": "wine", "rarity": "epic", "effects": {"intoxication": 4, "mood_boost": 5}, "description": "Sweet suffering"},
-            "sherry": {"name": "🍷 Sherry Shame", "price": 240, "type": "wine", "rarity": "epic", "effects": {"intoxication": 4, "mood_boost": 4}, "description": "Grandma's favorite disappointment"},
-            "icewine": {"name": "🍷 Ice Cold Regret", "price": 350, "type": "wine", "rarity": "epic", "effects": {"intoxication": 3, "mood_boost": 6}, "description": "Frozen tears"},
-            "champagne": {"name": "🍷 Champagne Failure", "price": 400, "type": "wine", "rarity": "epic", "effects": {"intoxication": 3, "mood_boost": 5}, "description": "For celebrating your failures"},
-            "boxwine": {"name": "🍷 Box of Shame", "price": 80, "type": "wine", "rarity": "common", "effects": {"intoxication": 4, "mood_boost": 1}, "description": "For when you've truly given up"},
-
-            # ========== 🍸 COCKTAILS (20) ==========
-            "martini": {"name": "🍸 Classic Mistake", "price": 250, "type": "cocktail", "rarity": "rare", "effects": {"intoxication": 3, "mood_boost": 3}, "description": "For wannabe James Bonds"},
-            "mojito": {"name": "🍹 Mojito Mediocrity", "price": 220, "type": "cocktail", "rarity": "common", "effects": {"intoxication": 2, "mood_boost": 3}, "description": "Basic but refreshing"},
-            "oldfashioned": {"name": "🥃 Old Fashioned Failure", "price": 280, "type": "cocktail", "rarity": "rare", "effects": {"intoxication": 4, "mood_boost": 2}, "description": "For boomers and disappointments"},
-            "margarita": {"name": "🍹 Margarita Mess", "price": 200, "type": "cocktail", "rarity": "common", "effects": {"intoxication": 3, "mood_boost": 3}, "description": "Salt-rimmed sadness"},
-            "cosmo": {"name": "🍸 Cosmopolitan Cringe", "price": 230, "type": "cocktail", "rarity": "common", "effects": {"intoxication": 3, "mood_boost": 4}, "description": "For Sex and the City fans"},
-            "manhattan": {"name": "🍸 Manhattan Mess", "price": 270, "type": "cocktail", "rarity": "rare", "effects": {"intoxication": 4, "mood_boost": 3}, "description": "Urban disappointment"},
-            "daiquiri": {"name": "🍹 Daiquiri Disaster", "price": 190, "type": "cocktail", "rarity": "common", "effects": {"intoxication": 2, "mood_boost": 4}, "description": "Frozen failure"},
-            "negroni": {"name": "🍸 Negroni Nightmare", "price": 260, "type": "cocktail", "rarity": "rare", "effects": {"intoxication": 4, "mood_boost": 3}, "description": "Bitter life choices"},
-            "whiskeysour": {"name": "🥃 Whiskey Sour Regret", "price": 240, "type": "cocktail", "rarity": "rare", "effects": {"intoxication": 3, "mood_boost": 3}, "description": "Sweet and sour shame"},
-            "mai tai": {"name": "🍹 Mai Tai Mistake", "price": 290, "type": "cocktail", "rarity": "rare", "effects": {"intoxication": 4, "mood_boost": 4}, "description": "Tropical disappointment"},
-            "pina colada": {"name": "🍹 Piña Colada Problems", "price": 210, "type": "cocktail", "rarity": "common", "effects": {"intoxication": 3, "mood_boost": 4}, "description": "Beach-themed sadness"},
-            "long island": {"name": "🍸 Long Island Regret", "price": 300, "type": "cocktail", "rarity": "epic", "effects": {"intoxication": 5, "mood_boost": 2}, "description": "For when you want to black out efficiently"},
-            "bloody mary": {"name": "🍸 Bloody Mary Mess", "price": 180, "type": "cocktail", "rarity": "common", "effects": {"intoxication": 3, "mood_boost": 2}, "description": "Breakfast of champions (losers)"},
-            "moscow mule": {"name": "🍸 Moscow Mule Misery", "price": 220, "type": "cocktail", "rarity": "common", "effects": {"intoxication": 3, "mood_boost": 3}, "description": "Copper-cup cringe"},
-            "gin tonic": {"name": "🍸 Gin & Tonic Grief", "price": 190, "type": "cocktail", "rarity": "common", "effects": {"intoxication": 3, "mood_boost": 2}, "description": "Basic British sadness"},
-            "sazerac": {"name": "🍸 Sazerac Shame", "price": 310, "type": "cocktail", "rarity": "epic", "effects": {"intoxication": 4, "mood_boost": 4}, "description": "New Orleans-style failure"},
-            "aviation": {"name": "🍸 Aviation Accident", "price": 280, "type": "cocktail", "rarity": "rare", "effects": {"intoxication": 3, "mood_boost": 4}, "description": "Crash and burn in style"},
-            "lastword": {"name": "🍸 Last Word Loser", "price": 320, "type": "cocktail", "rarity": "epic", "effects": {"intoxication": 4, "mood_boost": 5}, "description": "Final words of regret"},
-            "zombie": {"name": "🍹 Zombie Apocalypse", "price": 350, "type": "cocktail", "rarity": "epic", "effects": {"intoxication": 5, "mood_boost": 3}, "description": "For the walking dead"},
-            "painkiller": {"name": "🍹 Painkiller Placebo", "price": 270, "type": "cocktail", "rarity": "rare", "effects": {"intoxication": 3, "mood_boost": 5}, "description": "Doesn't actually kill pain"},
-
-            # ========== 🥤 NON-ALCOHOLIC (15) ==========
-            "water": {"name": "💧 Tap Water Tears", "price": 10, "type": "soft", "rarity": "common", "effects": {"intoxication": -2, "mood_boost": 1}, "description": "For sober losers"},
-            "soda": {"name": "🥤 Soda Sadness", "price": 20, "type": "soft", "rarity": "common", "effects": {"intoxication": 0, "mood_boost": 1}, "description": "Bubbles without the fun"},
-            "juice": {"name": "🧃 Juice of Shame", "price": 25, "type": "soft", "rarity": "common", "effects": {"intoxication": 0, "mood_boost": 2}, "description": "For children and designated drivers"},
-            "coffee": {"name": "☕ Bitter Coffee", "price": 30, "type": "soft", "rarity": "common", "effects": {"intoxication": 0, "mood_boost": 3}, "description": "For people with responsibilities"},
-            "tea": {"name": "🍵 Weak Tea", "price": 25, "type": "soft", "rarity": "common", "effects": {"intoxication": 0, "mood_boost": 2}, "description": "British disappointment"},
-            "lemonade": {"name": "🍋 Lemonade Lament", "price": 35, "type": "soft", "rarity": "common", "effects": {"intoxication": 0, "mood_boost": 3}, "description": "When life gives you lemons, cry"},
-            "milkshake": {"name": "🥤 Milkshake Misery", "price": 50, "type": "soft", "rarity": "common", "effects": {"intoxication": 0, "mood_boost": 4}, "description": "For emotional eaters"},
-            "smoothie": {"name": "🥤 Smoothie Sadness", "price": 45, "type": "soft", "rarity": "common", "effects": {"intoxication": 0, "mood_boost": 3}, "description": "Healthy but unhappy"},
-            "energy": {"name": "⚡ Energy Drink Despair", "price": 40, "type": "soft", "rarity": "common", "effects": {"intoxication": 0, "mood_boost": 4}, "description": "For gamers and night shift workers"},
-            "mocktail": {"name": "🍹 Mocktail Mockery", "price": 80, "type": "soft", "rarity": "rare", "effects": {"intoxication": 0, "mood_boost": 5}, "description": "All the effort, none of the fun"},
-            "rootbeer": {"name": "🍺 Root Beer Regret", "price": 35, "type": "soft", "rarity": "common", "effects": {"intoxication": 0, "mood_boost": 2}, "description": "For people who miss childhood"},
-            "gingerale": {"name": "🥤 Ginger Ale Grief", "price": 30, "type": "soft", "rarity": "common", "effects": {"intoxication": 0, "mood_boost": 2}, "description": "For upset stomachs and souls"},
-            "tonic": {"name": "💧 Tonic of Tedium", "price": 25, "type": "soft", "rarity": "common", "effects": {"intoxication": 0, "mood_boost": 1}, "description": "Bitter without the gin"},
-            "cola": {"name": "🥤 Corporate Cola", "price": 30, "type": "soft", "rarity": "common", "effects": {"intoxication": 0, "mood_boost": 2}, "description": "Capitalist tears"},
-            "seltzer": {"name": "💧 Seltzer Sadness", "price": 20, "type": "soft", "rarity": "common", "effects": {"intoxication": 0, "mood_boost": 1}, "description": "Fancy water for basic people"},
-
-            # ========== 🍹 VODKA & RUM (10) ==========
-            "vodka": {"name": "🥃 Vodka Vomit", "price": 120, "type": "vodka", "rarity": "common", "effects": {"intoxication": 4, "mood_boost": 1}, "description": "For college students and Russians"},
-            "rum": {"name": "🥃 Rum Regret", "price": 130, "type": "rum", "rarity": "common", "effects": {"intoxication": 3, "mood_boost": 3}, "description": "Pirate-themed poor decisions"},
-            "tequila": {"name": "🥃 Tequila Trauma", "price": 140, "type": "tequila", "rarity": "common", "effects": {"intoxication": 4, "mood_boost": 2}, "description": "For bad decisions and worse memories"},
-            "gin": {"name": "🥃 Gin Grief", "price": 150, "type": "gin", "rarity": "common", "effects": {"intoxication": 3, "mood_boost": 2}, "description": "Tastes like Christmas tree sadness"},
-            "brandy": {"name": "🥃 Brandy Blunder", "price": 180, "type": "brandy", "rarity": "rare", "effects": {"intoxication": 3, "mood_boost": 4}, "description": "For old people and failures"},
-            "cognac": {"name": "🥃 Cognac Catastrophe", "price": 300, "type": "cognac", "rarity": "epic", "effects": {"intoxication": 4, "mood_boost": 5}, "description": "Expensive French disappointment"},
-            "absinthe": {"name": "🥃 Absinthe Absurdity", "price": 400, "type": "absinthe", "rarity": "legendary", "effects": {"intoxication": 6, "mood_boost": 3}, "description": "Might make you see demons (or your ex)"},
-            "sake": {"name": "🍶 Sake Shame", "price": 160, "type": "sake", "rarity": "rare", "effects": {"intoxication": 3, "mood_boost": 3}, "description": "Japanese rice-based regret"},
-            "soju": {"name": "🍶 Soju Sorrow", "price": 110, "type": "soju", "rarity": "common", "effects": {"intoxication": 3, "mood_boost": 2}, "description": "Korean convenience store sadness"},
-            "mezcal": {"name": "🥃 Mezcal Mistake", "price": 220, "type": "mezcal", "rarity": "rare", "effects": {"intoxication": 4, "mood_boost": 3}, "description": "Smoky poor life choices"},
-        }
-        return drinks
-
-    @tasks.loop(minutes=15)
-    async def rude_announcements(self):
-        """Send rude announcements to the designated channel."""
-        if not self.announcement_channel_id:
-            return
+        """Initialize the drink menu with integrated pricing and effects."""
+        return {
+            # 🍺 Beers & Ales
+            "beer": {
+                "name": "🍺 Classic Ale",
+                "price": 50,
+                "type": "beer",
+                "rarity": "common",
+                "effects": {"intoxication": 1, "mood_boost": 1},
+                "description": "A reliable classic brew",
+                "cooldown_multiplier": 1.0
+            },
+            "stout": {
+                "name": "🍺 Dark Stout", 
+                "price": 75,
+                "type": "beer",
+                "rarity": "common",
+                "effects": {"intoxication": 2, "mood_boost": 1},
+                "description": "Rich and creamy dark beer",
+                "cooldown_multiplier": 1.2
+            },
+            "ipa": {
+                "name": "🍺 Hoppy IPA",
+                "price": 100,
+                "type": "beer", 
+                "rarity": "common",
+                "effects": {"intoxication": 2, "mood_boost": 2},
+                "description": "Bitter and aromatic craft beer",
+                "cooldown_multiplier": 1.3
+            },
             
-        channel = self.bot.get_channel(self.announcement_channel_id)
-        if not channel:
-            return
-
-        insults = [
-            "Hey alcoholics, maybe drink some water for once? Your livers are crying.",
-            "Just a reminder: being drunk doesn't make you funnier, just more annoying.",
-            "If you can read this, you're probably not drunk enough. Or you're a loser. Either way, drink up!",
-            "Pro tip: Alcohol doesn't solve your problems, it just makes you forget you have them. Cheers!",
-            "That's not a beer belly, that's a liquid asset storage facility. Keep investing!",
-            "They say alcohol kills brain cells. Good thing you can't lose what you never had!",
-            "Drinking alone? Don't worry, we judge you silently from the bar.",
-            "Your mother would be so proud of how much you can drink. Or disappointed. Probably disappointed.",
-            "Remember: The more you drink, the better looking everyone else becomes. It's science.",
-            "That's your fifth drink? Cute. Come back when you're a real alcoholic.",
-            "Drink responsibly? In this economy? LOL good one.",
-            "Your wallet is getting lighter and your liver is getting heavier. Perfect balance!",
-            "They say 'beer before liquor, never been sicker' - but who are 'they' to judge your life choices?",
-            "If you wake up without a hangover, you didn't drink enough. Try harder tomorrow.",
-            "Alcohol: because no great story ever started with someone eating a salad.",
-        ]
-
-        if random.random() < 0.3:  # 30% chance every 15 minutes
-            embed = discord.Embed(
-                title="🍻 **Bartender's Wisdom** 🍻",
-                description=random.choice(insults),
-                color=discord.Color.orange(),
-                timestamp=datetime.now(timezone.utc)
-            )
-            embed.set_footer(text="The Tipsy Tavern - We enable poor life choices!")
-            await channel.send(embed=embed)
-
-    @commands.command(name="setbarchannel")
-    @commands.has_permissions(administrator=True)
-    async def set_bar_channel(self, ctx: commands.Context, channel: discord.TextChannel = None):
-        """Set the channel for bartender announcements."""
-        channel = channel or ctx.channel
-        self.announcement_channel_id = channel.id
-        
-        embed = discord.Embed(
-            title="✅ Bar Channel Set",
-            description=f"Bartender announcements will now be sent to {channel.mention}",
-            color=discord.Color.green()
-        )
-        await ctx.send(embed=embed)
-
+            # 🍷 Wines & Spirits
+            "redwine": {
+                "name": "🍷 House Red",
+                "price": 150,
+                "type": "wine",
+                "rarity": "common", 
+                "effects": {"intoxication": 3, "mood_boost": 2},
+                "description": "Smooth red wine",
+                "cooldown_multiplier": 1.5
+            },
+            "whiskey": {
+                "name": "🥃 Aged Whiskey",
+                "price": 200,
+                "type": "spirit",
+                "rarity": "rare",
+                "effects": {"intoxication": 4, "mood_boost": 2},
+                "description": "Premium aged whiskey",
+                "cooldown_multiplier": 2.0
+            },
+            "vodka": {
+                "name": "🥃 Crystal Vodka", 
+                "price": 180,
+                "type": "spirit",
+                "rarity": "common",
+                "effects": {"intoxication": 4, "mood_boost": 1},
+                "description": "Clear and crisp vodka",
+                "cooldown_multiplier": 1.8
+            },
+            
+            # 🍸 Cocktails
+            "martini": {
+                "name": "🍸 Classic Martini",
+                "price": 250,
+                "type": "cocktail",
+                "rarity": "rare",
+                "effects": {"intoxication": 3, "mood_boost": 3},
+                "description": "Sophisticated and clean",
+                "cooldown_multiplier": 1.7
+            },
+            "mojito": {
+                "name": "🍹 Fresh Mojito",
+                "price": 220,
+                "type": "cocktail",
+                "rarity": "common",
+                "effects": {"intoxication": 2, "mood_boost": 3},
+                "description": "Refreshing mint cocktail",
+                "cooldown_multiplier": 1.4
+            },
+            "oldfashioned": {
+                "name": "🥃 Old Fashioned",
+                "price": 280,
+                "type": "cocktail", 
+                "rarity": "rare",
+                "effects": {"intoxication": 4, "mood_boost": 2},
+                "description": "Timeless whiskey classic",
+                "cooldown_multiplier": 2.0
+            },
+            
+            # 🥤 Non-Alcoholic
+            "soda": {
+                "name": "🥤 Sparkling Soda",
+                "price": 30,
+                "type": "soft",
+                "rarity": "common",
+                "effects": {"intoxication": 0, "mood_boost": 1},
+                "description": "Bubbly and refreshing",
+                "cooldown_multiplier": 0.5
+            },
+            "juice": {
+                "name": "🧃 Fresh Juice",
+                "price": 40,
+                "type": "soft",
+                "rarity": "common", 
+                "effects": {"intoxication": 0, "mood_boost": 2},
+                "description": "Vitamin-packed fruit juice",
+                "cooldown_multiplier": 0.5
+            },
+            "water": {
+                "name": "💧 Mineral Water", 
+                "price": 20,
+                "type": "soft",
+                "rarity": "common",
+                "effects": {"intoxication": -2, "mood_boost": 1},
+                "description": "Hydrates and sobers up quickly",
+                "cooldown_multiplier": 0.3
+            }
+        }
+    
     def format_money(self, amount: int) -> str:
         """Format money using main bot's system."""
         return f"{amount:,}£"
@@ -192,37 +289,71 @@ class BartenderCog(commands.Cog):
         return embed
     
     async def update_bar_data(self, user_id: int, update_data: Dict):
-        """Update user's bar data in the database."""
+        """Update user's bar data in the database with validation."""
         user_data = await db.get_user(user_id)
         if "bar_data" not in user_data:
-            user_data["bar_data"] = {}
+            user_data["bar_data"] = self._get_default_bar_data()
+        
+        # Validate intoxication level
+        if "intoxication_level" in update_data:
+            update_data["intoxication_level"] = max(0, min(
+                BartenderConfig.MAX_INTOXICATION, 
+                update_data["intoxication_level"]
+            ))
         
         # Merge updates into bar_data
         user_data["bar_data"].update(update_data)
         await db.update_user(user_id, user_data)
     
-    async def get_intoxication_level(self, user_id: int) -> int:
-        """Get user's current intoxication level."""
-        user_data = await db.get_user(user_id)
-        return user_data.get("bar_data", {}).get("intoxication_level", 0)
+    def _get_default_bar_data(self) -> Dict:
+        """Get default bar data structure."""
+        return {
+            "intoxication_level": 0,
+            "patron_level": 1,
+            "favorite_drink": None,
+            "drinks_tried": [],
+            "total_drinks_ordered": 0,
+            "bar_tab": 0,
+            "tips_given": 0,
+            "tips_received": 0,
+            "sobering_cooldown": None,
+            "unlocked_drinks": {},
+            "last_drink_time": None,
+            "total_spent": 0
+        }
     
-    async def apply_drink_effects(self, user_id: int, drink: Dict):
-        """Apply drink effects to user."""
+    async def get_intoxication_level(self, user_id: int) -> int:
+        """Get user's current intoxication level with validation."""
+        user_data = await db.get_user(user_id)
+        intoxication = user_data.get("bar_data", {}).get("intoxication_level", 0)
+        return max(0, min(BartenderConfig.MAX_INTOXICATION, intoxication))
+    
+    async def apply_drink_effects(self, user_id: int, drink: Dict) -> int:
+        """Apply drink effects to user with safety limits."""
         effects = drink["effects"]
         current_intoxication = await self.get_intoxication_level(user_id)
         
-        new_intoxication = max(0, current_intoxication + effects["intoxication"])
+        # Calculate new intoxication with limits
+        intoxication_change = effects["intoxication"]
+        new_intoxication = current_intoxication + intoxication_change
+        
+        # Apply hard limits
+        new_intoxication = max(0, min(BartenderConfig.MAX_INTOXICATION, new_intoxication))
         
         await self.update_bar_data(user_id, {
             "intoxication_level": new_intoxication,
             "last_drink_time": datetime.now().isoformat()
         })
         
-        # Start sobering task if not already running
-        if user_id not in self.sobering_tasks:
+        # Start sobering task if not already running and not drinking water
+        if user_id not in self.sobering_tasks and drink["name"] != "💧 Mineral Water":
             self.sobering_tasks[user_id] = asyncio.create_task(
                 self.sober_up(user_id)
             )
+        
+        # Force sober up if reaching dangerous levels
+        if new_intoxication >= BartenderConfig.FORCE_SOBER_LEVEL:
+            await self.force_sober_up(user_id)
         
         return new_intoxication
     
@@ -230,136 +361,186 @@ class BartenderCog(commands.Cog):
         """Gradually reduce intoxication over time."""
         await asyncio.sleep(300)  # 5 minutes
         
-        user_data = await db.get_user(user_id)
-        current_intoxication = user_data.get("bar_data", {}).get("intoxication_level", 0)
-        
-        if current_intoxication > 0:
-            new_intoxication = max(0, current_intoxication - 1)
-            await self.update_bar_data(user_id, {
-                "intoxication_level": new_intoxication
-            })
+        # Check if user still exists and needs sobering
+        try:
+            user_data = await db.get_user(user_id)
+            current_intoxication = user_data.get("bar_data", {}).get("intoxication_level", 0)
             
-            # Continue sobering if still intoxicated
-            if new_intoxication > 0:
+            if current_intoxication > 0:
+                new_intoxication = max(0, current_intoxication - BartenderConfig.SOBERING_RATE)
+                await self.update_bar_data(user_id, {
+                    "intoxication_level": new_intoxication
+                })
+                
+                # Continue sobering if still intoxicated
+                if new_intoxication > 0:
+                    self.sobering_tasks[user_id] = asyncio.create_task(
+                        self.sober_up(user_id)
+                    )
+                else:
+                    if user_id in self.sobering_tasks:
+                        del self.sobering_tasks[user_id]
+            else:
+                if user_id in self.sobering_tasks:
+                    del self.sobering_tasks[user_id]
+                
+        except Exception as e:
+            logging.error(f"Error in sober_up for user {user_id}: {e}")
+            if user_id in self.sobering_tasks:
+                del self.sobering_tasks[user_id]
+    
+    async def force_sober_up(self, user_id: int):
+        """Force sober up for highly intoxicated users."""
+        logging.warning(f"🚨 Force sobering up user {user_id} - reached dangerous intoxication levels")
+        
+        await self.update_bar_data(user_id, {
+            "intoxication_level": BartenderConfig.INTOXICATION_WARNING_LEVEL
+        })
+        
+        # Cancel any existing sobering tasks
+        if user_id in self.sobering_tasks:
+            self.sobering_tasks[user_id].cancel()
+            await asyncio.sleep(0.1)  # Allow cancellation to process
+        
+        # Start rapid sobering
+        self.sobering_tasks[user_id] = asyncio.create_task(
+            self.rapid_sober_up(user_id)
+        )
+    
+    async def rapid_sober_up(self, user_id: int):
+        """Rapid sobering for highly intoxicated users."""
+        logging.info(f"🚑 Starting rapid sobering for user {user_id}")
+        
+        for i in range(3):  # Sober up 3 points quickly
+            await asyncio.sleep(30)  # Every 30 seconds
+            
+            try:
+                current = await self.get_intoxication_level(user_id)
+                if current > BartenderConfig.INTOXICATION_WARNING_LEVEL:
+                    new_level = max(BartenderConfig.INTOXICATION_WARNING_LEVEL, current - 1)
+                    await self.update_bar_data(user_id, {
+                        "intoxication_level": new_level
+                    })
+                    logging.info(f"🚑 Rapid sobering {i+1}/3 for user {user_id}: {current} -> {new_level}")
+            except Exception as e:
+                logging.error(f"Error in rapid_sober_up step {i} for user {user_id}: {e}")
+                break
+        
+        # Continue with normal sobering if still needed
+        try:
+            current = await self.get_intoxication_level(user_id)
+            if current > 0:
                 self.sobering_tasks[user_id] = asyncio.create_task(
                     self.sober_up(user_id)
                 )
+                logging.info(f"🔁 Continuing normal sobering for user {user_id} at level {current}")
             else:
+                if user_id in self.sobering_tasks:
+                    del self.sobering_tasks[user_id]
+                logging.info(f"✅ Completed sobering for user {user_id}")
+        except Exception as e:
+            logging.error(f"Error finishing rapid sobering for user {user_id}: {e}")
+            if user_id in self.sobering_tasks:
                 del self.sobering_tasks[user_id]
-        else:
-            del self.sobering_tasks[user_id]
     
     def get_drink_suggestions(self, intoxication: int) -> List[str]:
         """Get appropriate drink suggestions based on intoxication level."""
-        if intoxication >= 5:
-            return ["water", "soda", "juice"]  # Sobering drinks
-        elif intoxication >= 3:
-            return ["beer", "soda", "juice"]   # Light drinks
+        if intoxication >= BartenderConfig.FORCE_SOBER_LEVEL:
+            return ["water"]  # Only water when forced sobering
+        
+        if intoxication >= BartenderConfig.INTOXICATION_DANGER_LEVEL:
+            return BartenderConfig.SOBERING_DRINKS + ["soda", "juice"]
+        
+        if intoxication >= BartenderConfig.INTOXICATION_WARNING_LEVEL:
+            return ["beer", "soda", "juice"] + BartenderConfig.SOBERING_DRINKS
+        
+        # Normal state - all drinks available
+        return list(self.drinks.keys())
+    
+    def get_intoxication_warning(self, level: int) -> Optional[str]:
+        """Get warning message based on intoxication level."""
+        if level >= BartenderConfig.FORCE_SOBER_LEVEL:
+            return "🚨 **HEALTH WARNING!** You've had too much to drink! For your safety, you're being automatically sobered up. Please drink water and take a break."
+        
+        if level >= BartenderConfig.INTOXICATION_DANGER_LEVEL:
+            return "⚠️ **DANGER!** You're heavily intoxicated! Consider switching to non-alcoholic drinks for your health."
+        
+        if level >= BartenderConfig.INTOXICATION_WARNING_LEVEL:
+            return "🔶 **Warning:** You're quite tipsy! Maybe slow down and have some water?"
+        
+        return None
+    
+    # ========== CORE COMMANDS ==========
+    
+    @commands.command(name="drink", aliases=["order", "bar"])
+    async def drink_menu(self, ctx: commands.Context, drink_type: str = None):
+        """View the drink menu or order a drink with security checks."""
+        if not drink_type:
+            await self.show_drink_menu(ctx)
         else:
-            return list(self.drinks.keys())    # All drinks
-
-    async def show_drink_menu(self, ctx: commands.Context, category: str = None):
-        """Display the drink menu with categories."""
-        if not category:
-            # Show main menu with categories
-            embed = await self.create_bar_embed("🍸 **DRINK MENU - PICK YOUR POISON** 🍸")
+            await self.order_drink(ctx, drink_type)
+    
+    async def show_drink_menu(self, ctx: commands.Context):
+        """Display the drink menu with intoxication-aware suggestions."""
+        embed = await self.create_bar_embed("🍸 Drink Menu")
+        
+        # Group drinks by type
+        drink_types = {}
+        for key, drink in self.drinks.items():
+            drink_type = drink["type"]
+            if drink_type not in drink_types:
+                drink_types[drink_type] = []
+            drink_types[drink_type].append(drink)
+        
+        # Add drinks to embed by type
+        for drink_type, drinks in drink_types.items():
+            drinks_text = ""
+            for drink in drinks:
+                drinks_text += f"{drink['name']} - {self.format_money(drink['price'])}\n"
             
-            categories = {
-                "🍺 BEERS": "`~beer-menu` - 15 different ways to disappoint yourself",
-                "🥃 WHISKEY": "`~whiskey-menu` - For real alcoholics only", 
-                "🍷 WINE": "`~wine-menu` - For basic bitches and divorcées",
-                "🍸 COCKTAILS": "`~cocktail-menu` - Fancy poor decisions",
-                "🥤 SOBER SHAME": "`~soft-menu` - For losers and designated drivers",
-                "🍹 VODKA & FRIENDS": "`~liquor-menu` - Various forms of liquid regret"
-            }
-            
-            for cat_name, cat_desc in categories.items():
-                embed.add_field(name=cat_name, value=cat_desc, inline=False)
+            type_emoji = {
+                "beer": "🍺", "wine": "🍷", "spirit": "🥃", 
+                "cocktail": "🍸", "soft": "🥤"
+            }.get(drink_type, "🍹")
             
             embed.add_field(
-                name="💸 **HOW TO ORDER**",
-                value="Use `~drink <name>`\nExample: `~drink beer` or `~drink whiskey`\n**All drinks use WALLET money!**",
-                inline=False
+                name=f"{type_emoji} {drink_type.title()}",
+                value=drinks_text,
+                inline=True
             )
-            
-            await ctx.send(embed=embed)
-        else:
-            # Show specific category
-            await self.show_category_menu(ctx, category)
-
-    async def show_category_menu(self, ctx: commands.Context, category: str):
-        """Show drinks from a specific category."""
-        category = category.lower()
-        category_map = {
-            "beer": ("🍺 **BEER MENU - LIQUID BREAD** 🍺", ["beer", "stout", "ipa", "lager", "pilsner", "ale", "porter", "wheat", "sour", "bock", "lambic", "trappist", "session", "imperial", "cider"]),
-            "whiskey": ("🥃 **WHISKEY MENU - TEARS OF ANGELS** 🥃", ["whiskey", "bourbon", "scotch", "rye", "irish", "tennessee", "singlepot", "corn", "blended", "smokey", "canadian", "japanese", "moonshine", "fireball", "aged"]),
-            "wine": ("🍷 **WINE MENU - GRAPE JUICE FOR ADULTS** 🍷", ["redwine", "whitewine", "rose", "sparkling", "chardonnay", "pinot", "cabernet", "merlot", "zinfandel", "syrah", "port", "sherry", "icewine", "champagne", "boxwine"]),
-            "cocktail": ("🍸 **COCKTAIL MENU - FANCY REGRET** 🍸", ["martini", "mojito", "oldfashioned", "margarita", "cosmo", "manhattan", "daiquiri", "negroni", "whiskeysour", "mai tai", "pina colada", "long island", "bloody mary", "moscow mule", "gin tonic", "sazerac", "aviation", "lastword", "zombie", "painkiller"]),
-            "soft": ("🥤 **SOFT MENU - SOBER SHAME** 🥤", ["water", "soda", "juice", "coffee", "tea", "lemonade", "milkshake", "smoothie", "energy", "mocktail", "rootbeer", "gingerale", "tonic", "cola", "seltzer"]),
-            "liquor": ("🍹 **LIQUOR MENU - VARIOUS REGRETS** 🍹", ["vodka", "rum", "tequila", "gin", "brandy", "cognac", "absinthe", "sake", "soju", "mezcal"])
-        }
         
-        if category not in category_map:
-            await ctx.send("Invalid category! Use `~drink` to see available categories.")
-            return
-            
-        title, drinks = category_map[category]
-        embed = await self.create_bar_embed(title)
+        embed.add_field(
+            name="💡 How to Order",
+            value="Use `~drink <name>` to order a drink!\nExample: `~drink beer` or `~drink martini`",
+            inline=False
+        )
         
-        for drink_key in drinks:
-            if drink_key in self.drinks:
-                drink = self.drinks[drink_key]
+        # Add intoxication-aware suggestions
+        intoxication = await self.get_intoxication_level(ctx.author.id)
+        if intoxication > 0:
+            suggestions = self.get_drink_suggestions(intoxication)
+            suggested_drinks = [self.drinks[s]["name"] for s in suggestions[:3] if s in self.drinks]
+            
+            if suggested_drinks:
                 embed.add_field(
-                    name=f"`~drink {drink_key}` - {drink['name']} - {self.format_money(drink['price'])}",
-                    value=f"{drink['description']}",
+                    name="🎯 Recommended Drinks",
+                    value=", ".join(suggested_drinks),
+                    inline=False
+                )
+            
+            # Add warning if needed
+            warning = self.get_intoxication_warning(intoxication)
+            if warning:
+                embed.add_field(
+                    name="🚨 Health Notice",
+                    value=warning,
                     inline=False
                 )
         
         await ctx.send(embed=embed)
-
-    @commands.command(name="drink", aliases=["order", "bar"])
-    async def drink_menu(self, ctx: commands.Context, category_or_drink: str = None):
-        """View drink menus or order a drink."""
-        if not category_or_drink:
-            await self.show_drink_menu(ctx)
-        elif category_or_drink.lower() in ["beer", "whiskey", "wine", "cocktail", "soft", "liquor"]:
-            await self.show_category_menu(ctx, category_or_drink.lower())
-        else:
-            await self.order_drink(ctx, category_or_drink)
-
-    # Category-specific menu commands
-    @commands.command(name="beer-menu")
-    async def beer_menu(self, ctx: commands.Context):
-        """Show the beer menu."""
-        await self.show_category_menu(ctx, "beer")
-
-    @commands.command(name="whiskey-menu")
-    async def whiskey_menu(self, ctx: commands.Context):
-        """Show the whiskey menu."""
-        await self.show_category_menu(ctx, "whiskey")
-
-    @commands.command(name="wine-menu")
-    async def wine_menu(self, ctx: commands.Context):
-        """Show the wine menu."""
-        await self.show_category_menu(ctx, "wine")
-
-    @commands.command(name="cocktail-menu")
-    async def cocktail_menu(self, ctx: commands.Context):
-        """Show the cocktail menu."""
-        await self.show_category_menu(ctx, "cocktail")
-
-    @commands.command(name="soft-menu")
-    async def soft_menu(self, ctx: commands.Context):
-        """Show the non-alcoholic menu."""
-        await self.show_category_menu(ctx, "soft")
-
-    @commands.command(name="liquor-menu")
-    async def liquor_menu(self, ctx: commands.Context):
-        """Show the liquor menu."""
-        await self.show_category_menu(ctx, "liquor")
-
+    
     async def order_drink(self, ctx: commands.Context, drink_key: str):
-        """Order a specific drink."""
+        """Order a specific drink with comprehensive security checks."""
         drink_key = drink_key.lower()
         
         if drink_key not in self.drinks:
@@ -378,8 +559,40 @@ class BartenderCog(commands.Cog):
             await ctx.send(embed=embed)
             return
         
+        # Security validation
+        can_order, cooldown_remaining = await self.security_manager.check_drink_cooldown(ctx.author.id, drink_key)
+        if not can_order:
+            embed = await self.create_bar_embed("⏰ Drink Cooldown", discord.Color.orange())
+            embed.description = f"You've ordered this drink too recently. Please wait {int(cooldown_remaining)} seconds."
+            await ctx.send(embed=embed)
+            return
+        
+        # Validate order security
+        is_valid_order, order_error = self.security_manager.validate_drink_order(ctx.author.id, drink_key)
+        if not is_valid_order:
+            embed = await self.create_bar_embed("❌ Order Limit", discord.Color.red())
+            embed.description = order_error
+            await ctx.send(embed=embed)
+            return
+        
         drink = self.drinks[drink_key]
         user_data = await db.get_user(ctx.author.id)
+        intoxication = await self.get_intoxication_level(ctx.author.id)
+        
+        # Check intoxication limits
+        if intoxication >= BartenderConfig.FORCE_SOBER_LEVEL:
+            embed = await self.create_bar_embed("🚫 Health Safety Lock", discord.Color.red())
+            embed.description = (
+                "**HEALTH PROTECTION ACTIVATED!**\n\n"
+                "You've reached dangerous intoxication levels. For your safety, "
+                "you cannot order more alcoholic drinks until you sober up.\n\n"
+                "**Please order:**\n"
+                "💧 Water - To help sober up quickly\n"
+                "🥤 Soda - For something refreshing\n"
+                "🧃 Juice - For vitamins and energy"
+            )
+            await ctx.send(embed=embed)
+            return
         
         # Check if user has enough money
         if user_data["wallet"] < drink["price"]:
@@ -392,19 +605,18 @@ class BartenderCog(commands.Cog):
             await ctx.send(embed=embed)
             return
         
-        # Check intoxication level for strong drinks
-        intoxication = await self.get_intoxication_level(ctx.author.id)
-        if intoxication >= 5 and drink["effects"]["intoxication"] > 0:
-            embed = await self.create_bar_embed("🚫 Maybe Slow Down?", discord.Color.orange())
-            embed.description = (
-                f"You're already quite tipsy! Maybe try a non-alcoholic drink instead?\n\n"
+        # Warning for high intoxication
+        warning_embed = None
+        if intoxication >= BartenderConfig.INTOXICATION_WARNING_LEVEL and drink["effects"]["intoxication"] > 0:
+            warning_embed = await self.create_bar_embed("🚫 Maybe Slow Down?", discord.Color.orange())
+            warning_embed.description = (
+                f"You're already at intoxication level {intoxication}/10. "
+                f"Consider ordering a non-alcoholic drink instead?\n\n"
                 f"**Recommendations:**\n"
-                f"💧 Water - {self.format_money(self.drinks['water']['price'])}\n"
+                f"💧 Water - {self.format_money(self.drinks['water']['price'])} (sobers you up)\n"
                 f"🥤 Soda - {self.format_money(self.drinks['soda']['price'])}\n"
                 f"🧃 Juice - {self.format_money(self.drinks['juice']['price'])}"
             )
-            await ctx.send(embed=embed)
-            return
         
         # Process the drink order
         result = await db.update_balance(ctx.author.id, wallet_change=-drink["price"])
@@ -414,7 +626,8 @@ class BartenderCog(commands.Cog):
         
         # Track drink in user's history
         bar_updates = {
-            "total_drinks_ordered": user_data.get("bar_data", {}).get("total_drinks_ordered", 0) + 1
+            "total_drinks_ordered": user_data.get("bar_data", {}).get("total_drinks_ordered", 0) + 1,
+            "total_spent": user_data.get("bar_data", {}).get("total_spent", 0) + drink["price"]
         }
         
         # Add to drinks tried if new
@@ -425,6 +638,9 @@ class BartenderCog(commands.Cog):
         
         await self.update_bar_data(ctx.author.id, bar_updates)
         
+        # Set cooldown
+        self.security_manager.set_drink_cooldown(ctx.author.id, drink_key)
+        
         # Create success embed
         embed = await self.create_bar_embed("🍹 Drink Served!", discord.Color.green())
         embed.description = f"Here's your {drink['name']}! {drink['description']}"
@@ -433,12 +649,36 @@ class BartenderCog(commands.Cog):
         embed.add_field(name="💵 Remaining Wallet", value=self.format_money(result["wallet"]), inline=True)
         
         # Show intoxication effect
-        if drink["effects"]["intoxication"] > 0:
-            intoxication_emoji = "😊" if new_intoxication < 3 else "🥴" if new_intoxication < 5 else "🤪"
+        if drink["effects"]["intoxication"] != 0:
+            intoxication_emoji = "🍺" if drink["effects"]["intoxication"] > 0 else "💧"
+            intoxication_text = f"+{drink['effects']['intoxication']}" if drink["effects"]["intoxication"] > 0 else str(drink["effects"]["intoxication"])
+            
+            intoxication_levels = {
+                0: "😶 Sober",
+                1: "😊 Buzzed",
+                2: "😄 Tipsy", 
+                3: "🥴 Happy",
+                4: "🎉 Merry",
+                5: "🤪 Feeling Good",
+                6: "🚀 Lit",
+                7: "🌪️ Wasted",
+                8: "💫 Gone",
+                9: "🚑 Danger",
+                10: "🏥 Hospital"
+            }
+            
             embed.add_field(
                 name="🎭 Tipsy Meter", 
-                value=f"{intoxication_emoji} Level {new_intoxication}/10",
+                value=f"{intoxication_emoji} {intoxication_text} → {intoxication_levels.get(new_intoxication, 'Unknown')} ({new_intoxication}/10)",
                 inline=True
+            )
+        
+        # Show cooldown information for strong drinks
+        if drink_key in BartenderConfig.STRONG_DRINKS:
+            embed.add_field(
+                name="⏰ Next Order", 
+                value=f"Wait {BartenderConfig.DRINK_COOLDOWN}s before ordering this drink again",
+                inline=False
             )
         
         # Fun responses based on drink type
@@ -452,8 +692,19 @@ class BartenderCog(commands.Cog):
         
         embed.set_footer(text=responses.get(drink["type"], "Enjoy your drink! 🍹"))
         
+        # Send warning first if needed, then success message
+        if warning_embed:
+            warning_msg = await ctx.send(embed=warning_embed)
+            await asyncio.sleep(3)  # Show warning for 3 seconds
+            await warning_msg.delete()
+        
         await ctx.send(embed=embed)
-
+    
+    @commands.command(name="drink-menu", aliases=["menu", "bar-menu", "drinkmenu"])
+    async def drink_menu_detailed(self, ctx: commands.Context):
+        """Show the detailed drink menu."""
+        await self.show_drink_menu(ctx)
+    
     @commands.command(name="drink-info", aliases=["drinkabout", "drinkinfo"])
     async def drink_info(self, ctx: commands.Context, drink_key: str = None):
         """Get detailed information about a specific drink."""
@@ -493,6 +744,11 @@ class BartenderCog(commands.Cog):
         if effects_text:
             embed.add_field(name="⚡ Effects", value=effects_text, inline=False)
         
+        # Cooldown information
+        if drink.get("cooldown_multiplier", 1.0) > 1.0:
+            actual_cooldown = int(BartenderConfig.DRINK_COOLDOWN * drink["cooldown_multiplier"])
+            embed.add_field(name="⏰ Cooldown", value=f"{actual_cooldown}s (longer for strong drinks)", inline=False)
+        
         # Check if user has tried this drink
         user_data = await db.get_user(ctx.author.id)
         drinks_tried = user_data.get("bar_data", {}).get("drinks_tried", [])
@@ -505,10 +761,10 @@ class BartenderCog(commands.Cog):
             )
         
         await ctx.send(embed=embed)
-
+    
     @commands.command(name="my-drinks", aliases=["drink-history", "bar-tab", "mydrinks", "drinkhistory", "bartab"])
     async def my_drinks(self, ctx: commands.Context, member: discord.Member = None):
-        """View your drink history and bar status."""
+        """View your drink history and bar status with safety information."""
         member = member or ctx.author
         user_data = await db.get_user(member.id)
         bar_data = user_data.get("bar_data", {})
@@ -519,13 +775,15 @@ class BartenderCog(commands.Cog):
         # Basic stats
         total_drinks = bar_data.get("total_drinks_ordered", 0)
         drinks_tried = bar_data.get("drinks_tried", [])
-        intoxication = bar_data.get("intoxication_level", 0)
+        intoxication = await self.get_intoxication_level(member.id)
+        total_spent = bar_data.get("total_spent", 0)
         
         embed.add_field(
             name="📊 Bar Stats",
             value=(
                 f"**Total Drinks:** {total_drinks}\n"
                 f"**Unique Drinks:** {len(drinks_tried)}/{len(self.drinks)}\n"
+                f"**Total Spent:** {self.format_money(total_spent)}\n"
                 f"**Favorite:** {bar_data.get('favorite_drink', 'None yet')}\n"
                 f"**Tips Given:** {self.format_money(bar_data.get('tips_given', 0))}\n"
                 f"**Tips Received:** {self.format_money(bar_data.get('tips_received', 0))}"
@@ -533,12 +791,21 @@ class BartenderCog(commands.Cog):
             inline=True
         )
         
-        # Intoxication meter
-        intoxication_emoji = "😶" if intoxication == 0 else "😊" if intoxication < 3 else "🥴" if intoxication < 5 else "🤪" if intoxication < 8 else "💀"
+        # Intoxication meter with safety information
+        intoxication_emoji = "😶" if intoxication == 0 else "😊" if intoxication < 3 else "🥴" if intoxication < 5 else "🤪" if intoxication < 8 else "💫" if intoxication < 10 else "🚑"
+        
+        safety_status = "🟢 Sober" if intoxication == 0 else \
+                       "🟡 Buzzed" if intoxication < 3 else \
+                       "🟠 Tipsy" if intoxication < 5 else \
+                       "🔴 Drunk" if intoxication < 8 else \
+                       "🚨 Danger" if intoxication < 10 else \
+                       "🏥 Emergency"
+        
         embed.add_field(
             name="🎭 Current State",
             value=(
                 f"**Tipsy Level:** {intoxication_emoji} {intoxication}/10\n"
+                f"**Safety:** {safety_status}\n"
                 f"**Wallet:** {self.format_money(user_data['wallet'])}\n"
                 f"**Can afford:** {sum(1 for d in self.drinks.values() if d['price'] <= user_data['wallet'])} drinks"
             ),
@@ -557,13 +824,13 @@ class BartenderCog(commands.Cog):
             )
         
         # Patron level based on drinks tried
-        patron_level = "Newcomer"
+        patron_level = "🍶 Newcomer"
         if len(drinks_tried) >= 10:
-            patron_level = "Regular 🥉"
+            patron_level = "🍺 Regular 🥉"
         if len(drinks_tried) >= 20:
-            patron_level = "VIP 🥈"  
+            patron_level = "🍷 VIP 🥈"  
         if len(drinks_tried) >= 30:
-            patron_level = "Bar Legend 🥇"
+            patron_level = "🍾 Bar Legend 🥇"
         
         embed.add_field(
             name="🏆 Patron Status",
@@ -571,16 +838,37 @@ class BartenderCog(commands.Cog):
             inline=False
         )
         
+        # Safety warning if highly intoxicated
+        warning = self.get_intoxication_warning(intoxication)
+        if warning:
+            embed.add_field(
+                name="🚨 Health Notice",
+                value=warning,
+                inline=False
+            )
+        
         await ctx.send(embed=embed)
-
-    @commands.command(name="sober-up", aliases=["sober", "water", "soberup"])
+    
+    @commands.command(name="sober-up", aliases=["sober", "water"])
     async def sober_up_command(self, ctx: commands.Context):
-        """Order water to help sober up."""
+        """Order water to help sober up with cooldown."""
+        # Check cooldown for sober-up command
+        can_order, cooldown_remaining = await self.security_manager.check_drink_cooldown(ctx.author.id, "sober_up")
+        if not can_order:
+            embed = await self.create_bar_embed("⏰ Cooldown Active", discord.Color.orange())
+            embed.description = f"You can use sober-up again in {int(cooldown_remaining)} seconds."
+            await ctx.send(embed=embed)
+            return
+        
+        # Set cooldown
+        self.security_manager.set_drink_cooldown(ctx.author.id, "sober_up")
+        
+        # Order water
         await self.order_drink(ctx, "water")
 
     @commands.command(name="drink-buy", aliases=["buy-drink", "gift-drink", "drinkbuy", "buydrink", "giftdrink"])
     async def buy_drink_for_user(self, ctx: commands.Context, member: discord.Member = None, drink_key: str = None):
-        """Buy a drink for another user."""
+        """Buy a drink for another user with security checks."""
         if not member or not drink_key:
             embed = await self.create_bar_embed("🍻 Buy a Drink for Someone", discord.Color.blue())
             embed.description = "Buy a drink for a friend!\n\n**Usage:** `~drink-buy @user <drink>`\n**Example:** `~drink-buy @John beer`"
@@ -601,6 +889,14 @@ class BartenderCog(commands.Cog):
         if member.bot:
             embed = await self.create_bar_embed("❌ Can't Buy Bots Drinks", discord.Color.red())
             embed.description = "Bots don't drink! Try buying for a real person."
+            await ctx.send(embed=embed)
+            return
+        
+        # Check gift cooldown
+        can_gift, cooldown_remaining = await self.security_manager.check_gift_cooldown(ctx.author.id)
+        if not can_gift:
+            embed = await self.create_bar_embed("⏰ Gift Cooldown", discord.Color.orange())
+            embed.description = f"You're sending gifts too quickly! Please wait {int(cooldown_remaining)} seconds."
             await ctx.send(embed=embed)
             return
         
@@ -625,6 +921,17 @@ class BartenderCog(commands.Cog):
             await ctx.send(embed=embed)
             return
         
+        # Check if recipient is too intoxicated for alcoholic drinks
+        recipient_intoxication = await self.get_intoxication_level(member.id)
+        if recipient_intoxication >= BartenderConfig.FORCE_SOBER_LEVEL and drink["effects"]["intoxication"] > 0:
+            embed = await self.create_bar_embed("🚫 Recipient Too Intoxicated", discord.Color.red())
+            embed.description = (
+                f"{member.display_name} is too intoxicated for alcoholic drinks right now. "
+                f"Consider buying them a non-alcoholic drink instead for their health."
+            )
+            await ctx.send(embed=embed)
+            return
+        
         # Process the payment and drink gift
         result = await db.update_balance(ctx.author.id, wallet_change=-drink["price"])
         
@@ -639,11 +946,20 @@ class BartenderCog(commands.Cog):
             "total_drinks_ordered": receiver_data.get("bar_data", {}).get("total_drinks_ordered", 0) + 1
         })
         
+        # Apply drink effects to recipient (but don't allow them to get too drunk from gifts)
+        if drink["effects"]["intoxication"] > 0:
+            current_intoxication = await self.get_intoxication_level(member.id)
+            if current_intoxication < BartenderConfig.FORCE_SOBER_LEVEL:
+                await self.apply_drink_effects(member.id, drink)
+        
         # Add to receiver's drinks tried if new
         drinks_tried = receiver_data.get("bar_data", {}).get("drinks_tried", [])
         if drink_key not in drinks_tried:
             drinks_tried.append(drink_key)
             await self.update_bar_data(member.id, {"drinks_tried": drinks_tried})
+        
+        # Set gift cooldown
+        self.security_manager.set_gift_cooldown(ctx.author.id)
         
         # Create success embed
         embed = await self.create_bar_embed("🎁 Drink Gift Sent!", discord.Color.green())
