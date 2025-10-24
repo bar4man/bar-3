@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 from economy import db
-from config.constants import GamblingConfig
+from constants import GamblingConfig
 from error_handler import ErrorHandler
 
 class GamblingSecurityManager:
