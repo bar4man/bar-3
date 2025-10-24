@@ -7,6 +7,7 @@ import asyncio
 import json
 from datetime import datetime, timezone, timedelta
 import webserver
+from constants import SecurityConfig
 
 # ---------------- Setup ----------------
 load_dotenv()
@@ -41,13 +42,6 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 intents.guilds = True
-
-# ---------------- Security Constants ----------------
-class SecurityConfig:
-    SPAM_LIMIT = 5
-    SPAM_TIMEFRAME = 5  # seconds
-    MAX_TRACKED_USERS = 1000
-    CLEANUP_INTERVAL = 60  # seconds
 
 # ---------------- Manager Classes (Define FIRST) ----------------
 class ConfigManager:
