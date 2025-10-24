@@ -63,7 +63,7 @@ class MarketConfig:
     
     # Fees and Limits
     STOCK_FEE = 0.005  # 0.5%
-    GOLD_FEE = 0.01    # 1%
+    GOLD_FEE = 0.01   # 1%
     MIN_GOLD_PURCHASE = 0.1
     MAX_STOCK_ORDER = 1000000
     MAX_GOLD_ORDER = 1000
