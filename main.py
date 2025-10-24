@@ -43,6 +43,13 @@ intents.message_content = True
 intents.members = True
 intents.guilds = True
 
+# ---------------- Security Constants ----------------
+class SecurityConfig:
+    SPAM_LIMIT = 5
+    SPAM_TIMEFRAME = 5  # seconds
+    MAX_TRACKED_USERS = 1000
+    CLEANUP_INTERVAL = 60  # seconds
+
 # ---------------- Manager Classes (Define FIRST) ----------------
 class ConfigManager:
     def __init__(self, filename="config.json"):
@@ -57,21 +64,29 @@ class ConfigManager:
             "allowed_channels": [],
             "mod_log_channel": None
         }
-        self._ensure_config_exists()
+        asyncio.create_task(self._ensure_config_exists())
     
-    def _ensure_config_exists(self):
-        """Create config file with default structure if it doesn't exist."""
-        if not os.path.exists(self.filename):
-            with open(self.filename, "w") as f:
-                json.dump(self.default_config, f, indent=2)
-            logging.info(f"Created new config file: {self.filename}")
+    async def _ensure_config_exists(self):
+        """Async config file creation."""
+        try:
+            async with self.lock:
+                try:
+                    async with aiofiles.open(self.filename, "r") as f:
+                        await f.read()  # Just check if file exists and is readable
+                except FileNotFoundError:
+                    async with aiofiles.open(self.filename, "w") as f:
+                        await f.write(json.dumps(self.default_config, indent=2, ensure_ascii=False))
+                    logging.info(f"Created new config file: {self.filename}")
+        except Exception as e:
+            logging.error(f"Config creation error: {e}")
     
     async def load(self):
         """Load configuration from file with error recovery."""
         async with self.lock:
             try:
-                with open(self.filename, "r") as f:
-                    config = json.load(f)
+                async with aiofiles.open(self.filename, "r") as f:
+                    content = await f.read()
+                    config = json.loads(content)
                 return {**self.default_config, **config}
             except (FileNotFoundError, json.JSONDecodeError) as e:
                 logging.error(f"Config load error: {e}, using defaults")
@@ -82,8 +97,8 @@ class ConfigManager:
         async with self.lock:
             try:
                 validated_data = {**self.default_config, **data}
-                with open(self.filename, "w") as f:
-                    json.dump(validated_data, f, indent=2, ensure_ascii=False)
+                async with aiofiles.open(self.filename, "w") as f:
+                    await f.write(json.dumps(validated_data, indent=2, ensure_ascii=False))
                 logging.info("Config saved successfully")
                 return True
             except Exception as e:
@@ -93,9 +108,102 @@ class ConfigManager:
 class MessageFilter:
     def __init__(self):
         self.spam_tracker = {}
-        self.SPAM_TIMEFRAME = 5
-        self.SPAM_LIMIT = 5
+        self.SPAM_TIMEFRAME = SecurityConfig.SPAM_TIMEFRAME
+        self.SPAM_LIMIT = SecurityConfig.SPAM_LIMIT
         self._last_cleanup = datetime.now(timezone.utc).timestamp()
+        self._cleanup_interval = SecurityConfig.CLEANUP_INTERVAL
+        self._max_tracker_size = SecurityConfig.MAX_TRACKED_USERS
+        self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
+        logging.info("✅ Message filter initialized with memory leak protection")
+    
+    def __del__(self):
+        """Cleanup when object is destroyed."""
+        if hasattr(self, '_cleanup_task'):
+            self._cleanup_task.cancel()
+    
+    async def _periodic_cleanup(self):
+        """Periodic cleanup task to prevent memory leaks."""
+        while True:
+            try:
+                await asyncio.sleep(self._cleanup_interval)
+                self._cleanup_old_entries()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logging.error(f"Periodic cleanup error: {e}")
+    
+    def is_spam(self, user_id):
+        """Check if user is spamming with automatic cleanup."""
+        now = datetime.now(timezone.utc).timestamp()
+        
+        # Cleanup old entries more frequently
+        if now - self._last_cleanup > self._cleanup_interval:
+            self._cleanup_old_entries()
+            self._last_cleanup = now
+        
+        # Limit tracker size
+        if len(self.spam_tracker) > self._max_tracker_size:
+            self._evict_oldest_entries()
+        
+        user_id_str = str(user_id)
+        self.spam_tracker.setdefault(user_id_str, [])
+        
+        # Remove old entries for this user
+        self.spam_tracker[user_id_str] = [
+            t for t in self.spam_tracker[user_id_str] 
+            if now - t < self.SPAM_TIMEFRAME
+        ]
+        
+        self.spam_tracker[user_id_str].append(now)
+        return len(self.spam_tracker[user_id_str]) > self.SPAM_LIMIT
+    
+    def _cleanup_old_entries(self):
+        """Clean up old spam tracker entries."""
+        now = datetime.now(timezone.utc).timestamp()
+        cutoff = now - 300  # 5 minutes
+        
+        users_to_remove = []
+        for user_id, timestamps in self.spam_tracker.items():
+            # Filter old timestamps
+            self.spam_tracker[user_id] = [t for t in timestamps if t > cutoff]
+            # Mark for removal if no recent activity
+            if not self.spam_tracker[user_id]:
+                users_to_remove.append(user_id)
+        
+        # Remove users with no recent activity
+        for user_id in users_to_remove:
+            del self.spam_tracker[user_id]
+        
+        if users_to_remove:
+            logging.debug(f"🧹 Cleaned up {len(users_to_remove)} inactive users from spam tracker")
+    
+    def _evict_oldest_entries(self):
+        """Remove oldest entries when tracker gets too large."""
+        if len(self.spam_tracker) <= self._max_tracker_size:
+            return
+        
+        # Remove 10% of oldest entries
+        entries_to_remove = max(1, len(self.spam_tracker) // 10)
+        
+        # Find users with oldest last activity
+        user_last_activity = {}
+        for user_id, timestamps in self.spam_tracker.items():
+            if timestamps:
+                user_last_activity[user_id] = max(timestamps)
+            else:
+                user_last_activity[user_id] = 0
+        
+        # Sort by last activity (oldest first)
+        sorted_users = sorted(user_last_activity.items(), key=lambda x: x[1])
+        
+        # Remove oldest entries
+        removed_count = 0
+        for user_id, _ in sorted_users[:entries_to_remove]:
+            if user_id in self.spam_tracker:
+                del self.spam_tracker[user_id]
+                removed_count += 1
+        
+        logging.info(f"🧹 Evicted {removed_count} oldest entries from spam tracker")
     
     def _load_filter_data(self):
         """Load filter data from file with caching."""
@@ -104,34 +212,6 @@ class MessageFilter:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             return {"blocked_links": [], "blocked_words": []}
-    
-    def is_spam(self, user_id):
-        """Check if user is spamming with automatic cleanup."""
-        now = datetime.now(timezone.utc).timestamp()
-        
-        # Cleanup old entries every 5 minutes
-        if now - self._last_cleanup > 300:
-            self._cleanup_old_entries()
-            self._last_cleanup = now
-        
-        self.spam_tracker.setdefault(user_id, [])
-        self.spam_tracker[user_id] = [
-            t for t in self.spam_tracker[user_id] 
-            if now - t < self.SPAM_TIMEFRAME
-        ]
-        
-        self.spam_tracker[user_id].append(now)
-        return len(self.spam_tracker[user_id]) > self.SPAM_LIMIT
-    
-    def _cleanup_old_entries(self):
-        """Clean up old spam tracker entries to prevent memory leaks."""
-        now = datetime.now(timezone.utc).timestamp()
-        cutoff = now - 300
-        self.spam_tracker = {
-            user_id: timestamps 
-            for user_id, timestamps in self.spam_tracker.items()
-            if any(t > cutoff for t in timestamps)
-        }
     
     def contains_blocked_content(self, content):
         """Check if message contains blocked words or links."""
@@ -148,9 +228,49 @@ class MessageFilter:
         
         return False, None
 
+# ---------------- Security Manager ----------------
+class SecurityManager:
+    def __init__(self):
+        self.suspicious_patterns = [
+            r"\b(admin|root|system)\b.*\b(password|passwd|pwd)\b",
+            r"eval\s*\(",
+            r"exec\s*\(",
+            r"__import__",
+            r"subprocess",
+            r"os\.system",
+            r"curl\s+",
+            r"wget\s+",
+            r"bash\s+",
+            r"sh\s+",
+            r"cmd\s+",
+            r"powershell\s+",
+        ]
+    
+    def validate_input(self, input_str: str, max_length: int = 1000) -> bool:
+        """Validate user input for potential security issues."""
+        if not input_str or len(input_str) > max_length:
+            return False
+        
+        # Check for suspicious patterns
+        import re
+        for pattern in self.suspicious_patterns:
+            if re.search(pattern, input_str, re.IGNORECASE):
+                logging.warning(f"🚨 Suspicious input detected: {input_str[:100]}...")
+                return False
+        
+        return True
+    
+    def sanitize_username(self, username: str) -> str:
+        """Sanitize username for safe display."""
+        import re
+        # Remove or escape potentially dangerous characters
+        sanitized = re.sub(r'[<>"\'&]', '', username)
+        return sanitized[:32]  # Limit length
+
 # ---------------- Create Manager Instances ----------------
 config_manager = ConfigManager()
 message_filter = MessageFilter()
+security_manager = SecurityManager()
 
 # ---------------- Bot Class (Define AFTER managers) ----------------
 class Bot(commands.Bot):
@@ -164,9 +284,9 @@ class Bot(commands.Bot):
             case_insensitive=True
         )
         self.start_time = datetime.now(timezone.utc)
-        # Now ConfigManager and MessageFilter are defined, so we can use them
         self.config_manager = config_manager
         self.message_filter = message_filter
+        self.security_manager = security_manager
     
     async def on_ready(self):
         """Enhanced on_ready with more detailed startup info."""
@@ -177,7 +297,7 @@ class Bot(commands.Bot):
         await self.change_presence(
             activity=discord.Activity(
                 type=discord.ActivityType.watching,
-                name="~help | Get Wasted! 🍻"
+                name="~help | Economy & Bar"
             ),
             status=discord.Status.online
         )
@@ -245,11 +365,21 @@ async def on_command_error(ctx, error):
 # ---------------- Message Filtering ----------------
 @bot.event
 async def on_message(message):
-    """Enhanced message handler with better filtering."""
+    """Enhanced message handler with better filtering and security."""
     if message.author.bot or isinstance(message.channel, discord.DMChannel):
         return
     
     try:
+        # Security validation
+        if not bot.security_manager.validate_input(message.content):
+            await message.delete()
+            warning_msg = await message.channel.send(
+                f"{message.author.mention}, that message contains suspicious content! 🚫",
+                delete_after=5
+            )
+            return
+        
+        # Spam checking
         if bot.message_filter.is_spam(message.author.id):
             await message.delete()
             warning_msg = await message.channel.send(
@@ -258,6 +388,7 @@ async def on_message(message):
             )
             return
         
+        # Content filtering
         is_blocked, block_type = bot.message_filter.contains_blocked_content(message.content)
         if is_blocked:
             await message.delete()
@@ -412,7 +543,7 @@ async def _show_general_help(ctx: commands.Context):
             "• Use `~economy` to see money commands\n"
             "• Use `~markets` for stock trading\n"
             "• Use `~gambling` for fun games\n"
-            "• Use `~bartender` for 100+ drinks\n"
+            "• Use `~bartender` for drinks and bar\n"
             "• Use `~admin` for moderation tools\n"
             "• Most commands have cooldowns for balance"
         ),
@@ -561,7 +692,7 @@ async def _show_economy_help(ctx: commands.Context):
         value=(
             "• **Shop purchases use BANK money**\n"
             "• **Payments use WALLET money**\n"
-            "• **Excess money is LOST** if over limits\n"
+            "• **Excess money is protected** - moved to bank when possible\n"
             "• **Penalty:** Lose 1£ for impossible deposits\n"
             "• Use `~deposit` to move money to bank\n"
             "• Use `~withdraw` to get money from bank"
@@ -661,6 +792,7 @@ async def _show_gambling_help(ctx: commands.Context):
         "`dice <bet>` - Dice game (50% win chance, multiple payouts)",
         "`slots <bet>` - Slot machine (better odds, two-matching wins)",
         "`rps <rock/paper/scissors> <bet>` - Rock Paper Scissors (2x win, tie returns bet)",
+        "`highlow <bet>` - High-Low card game (2x payout)",
         "`beg` - Beg for money (5min cooldown)"
     ]
     
@@ -696,6 +828,12 @@ async def _show_gambling_help(ctx: commands.Context):
     )
     
     embed.add_field(
+        name="🎴 High-Low",
+        value="**Win:** 2x your bet\n**Lose:** Lose your bet\n**Timeout:** Return bet\n**Cooldown:** 4 seconds",
+        inline=True
+    )
+    
+    embed.add_field(
         name="🙏 Begging",
         value="**Amount:** 10-70£ randomly\n**Cooldown:** 5 minutes\n**Success Rate:** High",
         inline=True
@@ -713,50 +851,54 @@ async def _show_gambling_help(ctx: commands.Context):
 async def _show_bartender_help(ctx: commands.Context):
     """Show bartender and bar commands."""
     embed = discord.Embed(
-        title="🍸 BARTENDER SYSTEM - GET WASTED 🍸",
-        description="100+ drinks to ruin your life! All drinks use WALLET money.",
+        title="🍸 Bartender & Bar Commands",
+        description="Order drinks, manage your bar tab, and enjoy social drinking!",
         color=discord.Color.orange()
     )
     
-    # Main Commands
-    main_cmds = [
-        "`~drink` - Main drink menu with categories",
-        "`~drink <name>` - Order specific drink (e.g., `~drink beer`)",
-        "`~my-drinks` - View your drinking history and intoxication",
-        "`~sober-up` - Sober up with water",
-        "`~drink-buy @user <drink>` - Buy someone a drink",
-        "`~setbarchannel` - Set channel for rude announcements (Admin)"
+    # Drinking Commands
+    drinking_cmds = [
+        "`~drink` - View drink menu or order a drink",
+        "`~drink-menu` - Show detailed drink menu", 
+        "`~drink-info <drink>` - Get info about a specific drink",
+        "`~my-drinks [user]` - View your drink history and bar status",
+        "`~sober-up` - Order water to sober up"
     ]
     
-    # Category Menus
-    menu_cmds = [
-        "`~beer-menu` - 15 different beers",
-        "`~whiskey-menu` - 15 whiskeys for alcoholics", 
-        "`~wine-menu` - 15 wines for basic people",
-        "`~cocktail-menu` - 20 fancy cocktails",
-        "`~soft-menu` - 15 non-alcoholic drinks for losers",
-        "`~liquor-menu` - 10 various liquors"
+    embed.add_field(
+        name="🍹 Drinking Commands",
+        value="\n".join(drinking_cmds),
+        inline=False
+    )
+    
+    # Social Commands
+    social_cmds = [
+        "`~drink-buy <user> <drink>` - Buy a drink for someone",
+        "`~toast` - Start a group toast (coming soon)",
+        "`~cheers` - Cheer with everyone (coming soon)"
     ]
     
-    # Drink Examples
-    drink_examples = [
-        "`~drink beer` - Piss Water Lite (30£)",
-        "`~drink whiskey` - Regret in a Glass (200£)",
-        "`~drink vodka` - Vodka Vomit (120£)",
-        "`~drink martini` - Classic Mistake (250£)",
-        "`~drink water` - Tap Water Tears (10£)",
-        "`~drink absinthe` - Absinthe Absurdity (400£)"
-    ]
+    embed.add_field(
+        name="🎉 Social Features",
+        value="\n".join(social_cmds),
+        inline=False
+    )
     
-    embed.add_field(name="🍹 MAIN COMMANDS", value="\n".join(main_cmds), inline=False)
-    embed.add_field(name="📋 DRINK MENUS", value="\n".join(menu_cmds), inline=False)
-    embed.add_field(name="🍻 QUICK ORDERS", value="\n".join(drink_examples), inline=False)
+    # Bar Information
+    embed.add_field(
+        name="💡 Bar Information",
+        value=(
+            "• **All drinks use WALLET money**\n"
+            "• **Drink prices:** 20-500£\n"
+            "• **Tipsy meter:** Tracks your intoxication (max 10)\n"
+            "• **Water helps sober up**\n"
+            "• **Drink cooldowns:** 30 seconds between same drinks\n"
+            "• **Try different drinks** to build your collection!"
+        ),
+        inline=False
+    )
     
-    embed.add_field(name="💸 PRICE RANGE", value="**10£ - 500£** (Wallet money only!)", inline=True)
-    embed.add_field(name="⚡ EFFECTS", value="Intoxication + Mood Boost\nWater sobers you up", inline=True)
-    embed.add_field(name="🎯 TIPS", value="Try all drinks!\nWater reduces intoxication\nCheck ~my-drinks for stats", inline=True)
-    
-    embed.set_footer(text="We're not responsible for your poor life choices!")
+    embed.set_footer(text="🍻 Drink responsibly and have fun!")
     await ctx.send(embed=embed)
 
 # ---------------- New Category Help Commands ----------------
@@ -831,7 +973,8 @@ async def setup_hook():
     logging.info("🔧 Starting bot setup...")
     
     os.makedirs("data", exist_ok=True)
-    logging.info("📁 Data directory initialized")
+    os.makedirs("backups", exist_ok=True)
+    logging.info("📁 Data directories initialized")
     
     await load_cogs()
     auto_cleaner.start()
@@ -847,7 +990,7 @@ async def on_ready():
     await bot.change_presence(
         activity=discord.Activity(
             type=discord.ActivityType.watching,
-            name="~help | Get Wasted! 🍻"
+            name="~help | Economy & Bar"
         ),
         status=discord.Status.online
     )
