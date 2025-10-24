@@ -8,7 +8,6 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, List, Tuple
 import math
-import aiofiles
 import json
 
 # ---------------- Economy Configuration ----------------
@@ -38,8 +37,9 @@ class BackupManager:
         filename = f"{self.backup_dir}/{backup_type}_backup_{timestamp}.json"
         
         try:
-            async with aiofiles.open(filename, 'w') as f:
-                await f.write(json.dumps(data, indent=2, default=str))
+            # Use regular file operations instead of aiofiles
+            with open(filename, 'w') as f:
+                json.dump(data, f, indent=2, default=str)
             
             # Clean up old backups
             await self._cleanup_old_backups(backup_type)
@@ -70,9 +70,8 @@ class BackupManager:
     async def restore_backup(self, filename: str) -> Dict[str, any]:
         """Restore data from backup."""
         try:
-            async with aiofiles.open(filename, 'r') as f:
-                content = await f.read()
-                return json.loads(content)
+            with open(filename, 'r') as f:
+                return json.load(f)
         except Exception as e:
             logging.error(f"❌ Restore failed: {e}")
             return {}
