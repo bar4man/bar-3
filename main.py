@@ -990,20 +990,6 @@ async def setup_hook():
     logging.info("✅ Setup hook completed")
 
 @bot.event
-async def on_ready():
-    """Enhanced on_ready with more detailed startup info."""
-    logging.info(f"✅ Bot is ready as {bot.user} (ID: {bot.user.id})")
-    logging.info(f"📊 Connected to {len(bot.guilds)} guild(s)")
-    
-    await bot.change_presence(
-        activity=discord.Activity(
-            type=discord.ActivityType.watching,
-            name="~help | Economy & Bar"
-        ),
-        status=discord.Status.online
-    )
-
-@bot.event
 async def on_guild_join(guild):
     """Log when bot joins a new guild."""
     logging.info(f"➕ Joined guild: {guild.name} (ID: {guild.id}) with {guild.member_count} members")
