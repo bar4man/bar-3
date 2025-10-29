@@ -344,7 +344,7 @@ class MarketSystem:
     
     def update_prices(self):
         """Optimized price updates with pre-calculated news impacts."""
-        if not self.market_open:
+        if not self.market.market_open:
             return
             
         sentiment = self.calculate_market_sentiment()
@@ -379,10 +379,14 @@ class MarketSystem:
             # Market sentiment effect
             change += sentiment * volatility * 2
             
+            # --- *** THIS IS THE FIX *** ---
             # Sector-specific news (optimized using cache)
-            sector_impact = self._news_impact_cache.get(symbol, 0) # <-- BUGFIX: was using sector, should be symbol
-            if stock["sector"] in self._news_impact_cache:
-                 change += self._news_impact_cache[stock["sector"]]
+            # We get the impact for the *symbol* (e.g., "TECH")
+            sector_impact = self._news_impact_cache.get(symbol, 0)
+            # And we *add it* to the change
+            change += sector_impact 
+            # The old "if stock['sector']..." check is removed as it was incorrect.
+            # --- *** END OF FIX *** ---
 
             # Company-specific factors
             earnings_surprise = random.gauss(0, 0.02)
@@ -541,169 +545,178 @@ class MarketCog(commands.Cog):
     @commands.command(name="market", aliases=["mkt"])
     async def market_status(self, ctx: commands.Context):
         """Get current market status and trends."""
-        status = self.market.get_market_status()
-        
-        embed = discord.Embed(
-            title="🏛️ Market Status",
-            color=discord.Color.blue() if status["market_open"] else discord.Color.red(),
-            timestamp=datetime.now(timezone.utc)
-        )
-        
-        # Market status
-        status_emoji = "🟢" if status["market_open"] else "🔴"
-        embed.add_field(
-            name="Market Status",
-            value=f"{status_emoji} {'OPEN' if status['market_open'] else 'CLOSED'}",
-            inline=True
-        )
-        
-        # Market sentiment
-        sentiment_emoji = "📈" if status["sentiment"] > 0.1 else "📉" if status["sentiment"] < -0.1 else "➡️"
-        embed.add_field(
-            name="Sentiment",
-            value=f"{sentiment_emoji} {status['trend'].title()}",
-            inline=True
-        )
-        
-        # Gold price
-        embed.add_field(
-            name="Gold Price",
-            value=f"${status['gold_price']:,.2f}/oz",
-            inline=True
-        )
-        
-        # Market change
-        change_color = discord.Color.green() if status["market_change"] > 0 else discord.Color.red()
-        change_emoji = "📈" if status["market_change"] > 0 else "📉"
-        embed.add_field(
-            name="Market Change",
-            value=f"{change_emoji} {status['market_change']:+.2f}%",
-            inline=True
-        )
-        
-        # Daily volume
-        embed.add_field(
-            name="Daily Volume",
-            value=f"{status['daily_volume']:,} shares",
-            inline=True
-        )
-        
-        # Trading hours
-        embed.add_field(
-            name="Trading Hours",
-            value=f"{MarketConfig.TRADING_HOURS['open']}:00 - {MarketConfig.TRADING_HOURS['close']}:00 UTC",
-            inline=True
-        )
-        
-        # News highlights
-        if status["news"]:
-            news_text = "\n".join([f"• {event['text']}" for event in status["news"][:2]])
-            embed.add_field(
-                name="📰 Market News",
-                value=news_text,
-                inline=False
+        try:
+            status = self.market.get_market_status()
+            
+            embed = discord.Embed(
+                title="🏛️ Market Status",
+                color=discord.Color.blue() if status["market_open"] else discord.Color.red(),
+                timestamp=datetime.now(timezone.utc)
             )
-        
-        embed.set_footer(text="Use ~stocks <symbol> for individual stock info")
-        await ctx.send(embed=embed)
+            
+            # Market status
+            status_emoji = "🟢" if status["market_open"] else "🔴"
+            embed.add_field(
+                name="Market Status",
+                value=f"{status_emoji} {'OPEN' if status['market_open'] else 'CLOSED'}",
+                inline=True
+            )
+            
+            # Market sentiment
+            sentiment_emoji = "📈" if status["sentiment"] > 0.1 else "📉" if status["sentiment"] < -0.1 else "➡️"
+            embed.add_field(
+                name="Sentiment",
+                value=f"{sentiment_emoji} {status['trend'].title()}",
+                inline=True
+            )
+            
+            # Gold price
+            embed.add_field(
+                name="Gold Price",
+                value=f"${status['gold_price']:,.2f}/oz",
+                inline=True
+            )
+            
+            # Market change
+            change_color = discord.Color.green() if status["market_change"] > 0 else discord.Color.red()
+            change_emoji = "📈" if status["market_change"] > 0 else "📉"
+            embed.add_field(
+                name="Market Change",
+                value=f"{change_emoji} {status['market_change']:+.2f}%",
+                inline=True
+            )
+            
+            # Daily volume
+            embed.add_field(
+                name="Daily Volume",
+                value=f"{status['daily_volume']:,} shares",
+                inline=True
+            )
+            
+            # Trading hours
+            embed.add_field(
+                name="Trading Hours",
+                value=f"{MarketConfig.TRADING_HOURS['open']}:00 - {MarketConfig.TRADING_HOURS['close']}:00 UTC",
+                inline=True
+            )
+            
+            # News highlights
+            if status["news"]:
+                news_text = "\n".join([f"• {event['text']}" for event in status["news"][:2]])
+                embed.add_field(
+                    name="📰 Market News",
+                    value=news_text,
+                    inline=False
+                )
+            
+            embed.set_footer(text="Use ~stocks <symbol> for individual stock info")
+            await ctx.send(embed=embed)
+        except Exception as e:
+            await ErrorHandler.handle_command_error(ctx, e, "market")
     
     @commands.command(name="stocks")
     async def stock_info(self, ctx: commands.Context, symbol: str = None):
         """Get information about specific stocks or list all available stocks."""
-        if not symbol:
-            # Show all available stocks
+        try:
+            if not symbol:
+                # Show all available stocks
+                embed = discord.Embed(
+                    title="📈 Available Stocks",
+                    color=discord.Color.blue(),
+                    timestamp=datetime.now(timezone.utc)
+                )
+                
+                for symbol, stock in self.market.stocks.items():
+                    change = self.market.get_price_change(symbol)
+                    change_emoji = "📈" if change > 0 else "📉"
+                    embed.add_field(
+                        name=f"{stock['name']} ({symbol})",
+                        value=f"${stock['price']:.2f} {change_emoji} {change:+.2f}%",
+                        inline=True
+                    )
+                
+                embed.set_footer(text="Use ~stocks <symbol> for detailed information")
+                await ctx.send(embed=embed)
+                return
+            
+            symbol = symbol.upper()
+            if symbol not in self.market.stocks:
+                embed = discord.Embed(
+                    title="❌ Stock Not Found",
+                    description=f"Stock symbol '{symbol}' not found. Available symbols: {', '.join(self.market.stocks.keys())}",
+                    color=discord.Color.red()
+                )
+                await ctx.send(embed=embed)
+                return
+            
+            stock = self.market.stocks[symbol]
+            change = self.market.get_price_change(symbol)
+            change_color = discord.Color.green() if change > 0 else discord.Color.red()
+            
             embed = discord.Embed(
-                title="📈 Available Stocks",
-                color=discord.Color.blue(),
+                title=f"📊 {stock['name']} ({symbol})",
+                description=stock["description"],
+                color=change_color,
                 timestamp=datetime.now(timezone.utc)
             )
             
-            for symbol, stock in self.market.stocks.items():
-                change = self.market.get_price_change(symbol)
-                change_emoji = "📈" if change > 0 else "📉"
-                embed.add_field(
-                    name=f"{stock['name']} ({symbol})",
-                    value=f"${stock['price']:.2f} {change_emoji} {change:+.2f}%",
-                    inline=True
-                )
+            # Price information
+            embed.add_field(name="💰 Current Price", value=f"${stock['price']:.2f}", inline=True)
+            embed.add_field(name="📈 Change", value=f"{change:+.2f}%", inline=True)
+            embed.add_field(name="📊 Volume", value=f"{stock['volume']:,}", inline=True)
             
-            embed.set_footer(text="Use ~stocks <symbol> for detailed information")
+            # Day range
+            embed.add_field(name="📅 Day Range", value=f"${stock['day_low']:.2f} - ${stock['day_high']:.2f}", inline=True)
+            
+            # Company info
+            embed.add_field(name="🏢 Sector", value=stock["sector"], inline=True)
+            embed.add_field(name="💵 Dividend Yield", value=f"{stock['dividend_yield']:.1%}", inline=True)
+            embed.add_field(name="📊 P/E Ratio", value=f"{stock['pe_ratio']:.1f}", inline=True)
+            embed.add_field(name="💰 Market Cap", value=f"${stock['market_cap']:,}", inline=True)
+            
+            # Volatility indicator
+            volatility_level = "Low" if stock["volatility"] < 0.015 else "Medium" if stock["volatility"] < 0.03 else "High"
+            embed.add_field(name="⚡ Volatility", value=volatility_level, inline=True)
+            
             await ctx.send(embed=embed)
-            return
-        
-        symbol = symbol.upper()
-        if symbol not in self.market.stocks:
-            embed = discord.Embed(
-                title="❌ Stock Not Found",
-                description=f"Stock symbol '{symbol}' not found. Available symbols: {', '.join(self.market.stocks.keys())}",
-                color=discord.Color.red()
-            )
-            await ctx.send(embed=embed)
-            return
-        
-        stock = self.market.stocks[symbol]
-        change = self.market.get_price_change(symbol)
-        change_color = discord.Color.green() if change > 0 else discord.Color.red()
-        
-        embed = discord.Embed(
-            title=f"📊 {stock['name']} ({symbol})",
-            description=stock["description"],
-            color=change_color,
-            timestamp=datetime.now(timezone.utc)
-        )
-        
-        # Price information
-        embed.add_field(name="💰 Current Price", value=f"${stock['price']:.2f}", inline=True)
-        embed.add_field(name="📈 Change", value=f"{change:+.2f}%", inline=True)
-        embed.add_field(name="📊 Volume", value=f"{stock['volume']:,}", inline=True)
-        
-        # Day range
-        embed.add_field(name="📅 Day Range", value=f"${stock['day_low']:.2f} - ${stock['day_high']:.2f}", inline=True)
-        
-        # Company info
-        embed.add_field(name="🏢 Sector", value=stock["sector"], inline=True)
-        embed.add_field(name="💵 Dividend Yield", value=f"{stock['dividend_yield']:.1%}", inline=True)
-        embed.add_field(name="📊 P/E Ratio", value=f"{stock['pe_ratio']:.1f}", inline=True)
-        embed.add_field(name="💰 Market Cap", value=f"${stock['market_cap']:,}", inline=True)
-        
-        # Volatility indicator
-        volatility_level = "Low" if stock["volatility"] < 0.015 else "Medium" if stock["volatility"] < 0.03 else "High"
-        embed.add_field(name="⚡ Volatility", value=volatility_level, inline=True)
-        
-        await ctx.send(embed=embed)
+        except Exception as e:
+            await ErrorHandler.handle_command_error(ctx, e, "stocks")
     
     @commands.command(name="gold")
     async def gold_info(self, ctx: commands.Context):
         """Get current gold market information."""
-        status = self.market.get_market_status()
-        
-        embed = discord.Embed(
-            title="🥇 Gold Market",
-            color=discord.Color.gold(),
-            timestamp=datetime.now(timezone.utc)
-        )
-        
-        embed.add_field(name="💰 Current Price", value=f"${self.market.gold_price:,.2f}/oz", inline=True)
-        embed.add_field(name="📈 Demand", value=f"{self.market.gold_demand:+.2f}", inline=True)
-        embed.add_field(name="⚡ Volatility", value=f"{self.market.gold_volatility:.1%}", inline=True)
-        
-        # Price range
-        embed.add_field(
-            name="📊 Price Range", 
-            value=f"${MarketConfig.MIN_GOLD_PRICE:,.0f} - ${MarketConfig.MAX_GOLD_PRICE:,.0f}", 
-            inline=True
-        )
-        
-        # Safe haven status
-        safe_haven = "🛡️ Strong" if status["sentiment"] < -0.2 else "🛡️ Moderate" if status["sentiment"] < 0 else "📉 Weak"
-        embed.add_field(name="🛡️ Safe Haven Status", value=safe_haven, inline=True)
-        
-        # Market correlation
-        correlation = "Inverse" if status["sentiment"] < 0 else "Positive" if status["sentiment"] > 0.2 else "Neutral"
-        embed.add_field(name="📈 Market Correlation", value=correlation, inline=True)
-        
-        embed.set_footer(text="Gold often moves inversely to stock markets during uncertainty")
-        await ctx.send(embed=embed)
+        try:
+            status = self.market.get_market_status()
+            
+            embed = discord.Embed(
+                title="🥇 Gold Market",
+                color=discord.Color.gold(),
+                timestamp=datetime.now(timezone.utc)
+            )
+            
+            embed.add_field(name="💰 Current Price", value=f"${self.market.gold_price:,.2f}/oz", inline=True)
+            embed.add_field(name="📈 Demand", value=f"{self.market.gold_demand:+.2f}", inline=True)
+            embed.add_field(name="⚡ Volatility", value=f"{self.market.gold_volatility:.1%}", inline=True)
+            
+            # Price range
+            embed.add_field(
+                name="📊 Price Range", 
+                value=f"${MarketConfig.MIN_GOLD_PRICE:,.0f} - ${MarketConfig.MAX_GOLD_PRICE:,.0f}", 
+                inline=True
+            )
+            
+            # Safe haven status
+            safe_haven = "🛡️ Strong" if status["sentiment"] < -0.2 else "🛡️ Moderate" if status["sentiment"] < 0 else "📉 Weak"
+            embed.add_field(name="🛡️ Safe Haven Status", value=safe_haven, inline=True)
+            
+            # Market correlation
+            correlation = "Inverse" if status["sentiment"] < 0 else "Positive" if status["sentiment"] > 0.2 else "Neutral"
+            embed.add_field(name="📈 Market Correlation", value=correlation, inline=True)
+            
+            embed.set_footer(text="Gold often moves inversely to stock markets during uncertainty")
+            await ctx.send(embed=embed)
+        except Exception as e:
+            await ErrorHandler.handle_command_error(ctx, e, "gold")
 
     # -------------------- NEW TRADING COMMANDS --------------------
 
