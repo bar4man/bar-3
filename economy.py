@@ -1,3 +1,4 @@
+# economy.py
 import discord
 from discord.ext import commands
 import motor.motor_asyncio
@@ -9,10 +10,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, List, Tuple
 import math
 import json
-from constants import EconomyConfig  # <-- ADDED IMPORT
-
-# ---------------- Economy Configuration (REMOVED) ----------------
-# All constants are now in constants.py
+from constants import EconomyConfig
+import aiofiles  # <-- ADDED IMPORT
+import glob      # <-- ADDED IMPORT
 
 # ---------------- Backup Manager ----------------
 class BackupManager:
@@ -22,14 +22,14 @@ class BackupManager:
         os.makedirs(self.backup_dir, exist_ok=True)
     
     async def create_backup(self, data: Dict[str, any], backup_type: str):
-        """Create a backup of critical data."""
+        """Create a backup of critical data asynchronously."""
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         filename = f"{self.backup_dir}/{backup_type}_backup_{timestamp}.json"
         
         try:
-            # Use regular file operations instead of aiofiles
-            with open(filename, 'w') as f:
-                json.dump(data, f, indent=2, default=str)
+            # Use aiofiles for async write
+            async with aiofiles.open(filename, 'w') as f:
+                await f.write(json.dumps(data, f, indent=2, default=str))
             
             # Clean up old backups
             await self._cleanup_old_backups(backup_type)
@@ -41,27 +41,34 @@ class BackupManager:
             return False
     
     async def _cleanup_old_backups(self, backup_type: str):
-        """Remove old backups to save space."""
-        import glob
+        """Remove old backups asynchronously to save space."""
         pattern = f"{self.backup_dir}/{backup_type}_backup_*.json"
-        backups = glob.glob(pattern)
         
-        if len(backups) > self.max_backups:
-            # Sort by timestamp (oldest first)
-            backups.sort()
-            # Remove oldest backups
-            for backup_file in backups[:-self.max_backups]:
-                try:
-                    os.remove(backup_file)
-                    logging.info(f"🗑️ Removed old backup: {backup_file}")
-                except Exception as e:
-                    logging.error(f"❌ Failed to remove backup {backup_file}: {e}")
+        # Run blocking I/O (glob, os.remove) in an executor thread
+        loop = asyncio.get_event_loop()
+        
+        try:
+            backups = await loop.run_in_executor(None, glob.glob, pattern)
+            
+            if len(backups) > self.max_backups:
+                # Sort by timestamp (oldest first)
+                backups.sort()
+                # Remove oldest backups
+                for backup_file in backups[:-self.max_backups]:
+                    try:
+                        await loop.run_in_executor(None, os.remove, backup_file)
+                        logging.info(f"🗑️ Removed old backup: {backup_file}")
+                    except Exception as e:
+                        logging.error(f"❌ Failed to remove backup {backup_file}: {e}")
+        except Exception as e:
+            logging.error(f"❌ Failed to cleanup backups: {e}")
     
     async def restore_backup(self, filename: str) -> Dict[str, any]:
-        """Restore data from backup."""
+        """Restore data from backup asynchronously."""
         try:
-            with open(filename, 'r') as f:
-                return json.load(f)
+            async with aiofiles.open(filename, 'r') as f:
+                content = await f.read()
+                return json.loads(content)
         except Exception as e:
             logging.error(f"❌ Restore failed: {e}")
             return {}
@@ -281,7 +288,7 @@ class MongoDB:
         for version in range(current_version, self._current_schema_version):
             migration_func = migrations.get(version)
             if migration_func:
-                user = migration_func(user)  # FIXED: Removed await for sync function
+                user = migration_func(user)
         
         user["_schema_version"] = self._current_schema_version
         await self.update_user(user["user_id"], user)
@@ -621,7 +628,7 @@ class MongoDB:
                 {"$set": update_data}
             )
         except Exception as e:
-            logging.error(f"❌ Error updating inventory item for user {user_id}: {e}")
+            logging.error(f"❌ Error updating inventory item for user {userid}: {e}")
     
     # Shop methods
     async def get_shop_items(self) -> List:
@@ -1026,8 +1033,69 @@ class Economy(commands.Cog):
                 )
         
         embed.add_field(name="💵 New Balance", value=f"{self.format_money(result['wallet'])} / {self.format_money(result['wallet_limit'])}", inline=False)
-        embed.set_footer(text="You can work again in 1 hour!")
+        embed.set_footer(text=f"You can work again in {self.format_time(EconomyConfig.WORK_COOLDOWN)}!")
         
+        await ctx.send(embed=embed)
+
+    @commands.command(name="daily")
+    async def daily(self, ctx: commands.Context):
+        """Claim your daily reward and build a streak."""
+        # Check cooldown
+        remaining = await self.check_cooldown(ctx.author.id, "daily", EconomyConfig.DAILY_COOLDOWN)
+        if remaining:
+            embed = await self.create_economy_embed("⏰ Daily Reward Claimed", discord.Color.orange())
+            embed.description = f"You can claim your next daily reward in **{self.format_time(remaining)}**."
+            return await ctx.send(embed=embed)
+        
+        user_data = await self.get_user(ctx.author.id)
+        now = datetime.now(timezone.utc)
+        
+        base_reward = EconomyConfig.DAILY_REWARD
+        streak = user_data.get("daily_streak", 0)
+        last_daily_str = user_data.get("last_daily")
+        
+        # Check for streak
+        if last_daily_str:
+            last_daily = datetime.fromisoformat(last_daily_str)
+            time_diff = now - last_daily
+            
+            if time_diff.days == 1:
+                streak += 1
+            elif time_diff.days > 1:
+                streak = 1  # Streak broken
+            else:
+                streak = 0 # Should not happen if cooldown is working, but as a fallback
+        else:
+            streak = 1  # First daily
+            
+        streak_bonus = streak * EconomyConfig.DAILY_STREAK_BONUS
+        total_reward = base_reward + streak_bonus
+        
+        # Update user
+        result = await self.update_balance(ctx.author.id, wallet_change=total_reward)
+        await db.update_user(ctx.author.id, {
+            "last_daily": now.isoformat(),
+            "daily_streak": streak
+        })
+        await self.set_cooldown(ctx.author.id, "daily")
+        
+        # Send success embed
+        embed = await self.create_economy_embed("🎉 Daily Reward Claimed!", discord.Color.green())
+        embed.description = f"You claimed your daily reward of **{self.format_money(total_reward)}**!"
+        
+        embed.add_field(name="💰 Base Reward", value=self.format_money(base_reward), inline=True)
+        embed.add_field(name="🔥 Streak Bonus", value=f"{self.format_money(streak_bonus)} ({streak} days)", inline=True)
+        embed.add_field(name="💵 New Wallet", value=self.format_money(result['wallet']), inline=True)
+        
+        # Check for overflow
+        if result.get("_overflow_handled"):
+            embed.add_field(
+                name="💸 Overflow Protection", 
+                value="Your wallet was full! Part of your reward was moved to your bank.",
+                inline=False
+            )
+            
+        embed.set_footer(text=f"Come back in {self.format_time(EconomyConfig.DAILY_COOLDOWN)} for your next reward!")
         await ctx.send(embed=embed)
 
     @commands.command(name="pay", aliases=["give", "transfer"])
