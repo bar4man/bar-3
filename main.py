@@ -1,3 +1,4 @@
+# main.py
 import discord
 from discord.ext import commands, tasks
 import logging
@@ -7,7 +8,8 @@ import asyncio
 import json
 from datetime import datetime, timezone, timedelta
 import webserver
-import re # <-- ADDED IMPORT
+import re
+import aiofiles  # <-- ADDED IMPORT
 
 # ---------------- Setup ----------------
 load_dotenv()
@@ -63,7 +65,7 @@ class ConfigManager:
             "allowed_channels": [],
             "mod_log_channel": None
         }
-        # Create config file synchronously
+        # Create config file synchronously (runs before event loop)
         self._ensure_config_exists()
     
     def _ensure_config_exists(self):
@@ -77,21 +79,22 @@ class ConfigManager:
             logging.error(f"Config creation error: {e}")
     
     async def load(self):
-        """Load configuration from file with error recovery."""
+        """Load configuration from file asynchronously."""
         try:
-            with open(self.filename, "r") as f:
-                config = json.load(f)
+            async with aiofiles.open(self.filename, "r") as f:
+                content = await f.read()
+                config = json.loads(content)
             return {**self.default_config, **config}
         except (FileNotFoundError, json.JSONDecodeError) as e:
             logging.error(f"Config load error: {e}, using defaults")
             return self.default_config.copy()
     
     async def save(self, data):
-        """Save configuration to file with validation."""
+        """Save configuration to file asynchronously."""
         try:
             validated_data = {**self.default_config, **data}
-            with open(self.filename, "w") as f:
-                json.dump(validated_data, f, indent=2, ensure_ascii=False)
+            async with aiofiles.open(self.filename, "w") as f:
+                await f.write(json.dumps(validated_data, f, indent=2, ensure_ascii=False))
             logging.info("Config saved successfully")
             return True
         except Exception as e:
