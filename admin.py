@@ -1,3 +1,4 @@
+# admin.py
 import discord
 from discord.ext import commands
 import json
@@ -6,7 +7,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
-import aiofiles
+import aiofiles  # <-- ADDED IMPORT
 
 # ---------------- Security Constants ----------------
 class AdminConfig:
@@ -140,13 +141,21 @@ class Admin(commands.Cog):
         self.log_channel_id: Optional[int] = None
         self.mod_actions: Dict[str, List[Dict]] = {}
         self.security_manager = AdminSecurityManager()
-        self._initialize_mod_logs()
+        # REMOVED: self._initialize_mod_logs() - Moved to async cog_load
     
-    def _initialize_mod_logs(self):
-        """Initialize moderation logs file."""
+    async def cog_load(self):
+        """Asynchronously initialize logs when cog is loaded."""
+        await self._initialize_mod_logs()
+    
+    async def _initialize_mod_logs(self):
+        """Initialize moderation logs file asynchronously."""
         if not os.path.exists("mod_logs.json"):
-            with open("mod_logs.json", "w") as f:
-                json.dump({}, f, indent=2)
+            try:
+                async with aiofiles.open("mod_logs.json", "w") as f:
+                    await f.write(json.dumps({}, indent=2))
+                logging.info("✅ Created mod_logs.json")
+            except Exception as e:
+                logging.error(f"❌ Failed to create mod_logs.json: {e}")
     
     # -------------------- Enhanced Permission System --------------------
     def is_admin(self, member: discord.Member) -> bool:
