@@ -6,7 +6,8 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
 from economy import db
-from constants import BartenderConfig  # <-- ADDED IMPORT
+from constants import BartenderConfig  # <-- FIXED IMPORT
+from error_handler import ErrorHandler # <-- ADDED IMPORT
 
 # ---------------- Bartender Configuration Constants (REMOVED) ----------------
 # All constants are now in constants.py
@@ -452,10 +453,13 @@ class BartenderCog(commands.Cog):
     @commands.command(name="drink", aliases=["order", "bar"])
     async def drink_menu(self, ctx: commands.Context, drink_type: str = None):
         """View the drink menu or order a drink with security checks."""
-        if not drink_type:
-            await self.show_drink_menu(ctx)
-        else:
-            await self.order_drink(ctx, drink_type)
+        try:
+            if not drink_type:
+                await self.show_drink_menu(ctx)
+            else:
+                await self.order_drink(ctx, drink_type)
+        except Exception as e:
+            await ErrorHandler.handle_command_error(ctx, e, "drink")
     
     async def show_drink_menu(self, ctx: commands.Context):
         """Display the drink menu with intoxication-aware suggestions."""
@@ -680,283 +684,298 @@ class BartenderCog(commands.Cog):
     @commands.command(name="drink-menu", aliases=["menu", "bar-menu", "drinkmenu"])
     async def drink_menu_detailed(self, ctx: commands.Context):
         """Show the detailed drink menu."""
-        await self.show_drink_menu(ctx)
+        try:
+            await self.show_drink_menu(ctx)
+        except Exception as e:
+            await ErrorHandler.handle_command_error(ctx, e, "drink-menu")
     
     @commands.command(name="drink-info", aliases=["drinkabout", "drinkinfo"])
     async def drink_info(self, ctx: commands.Context, drink_key: str = None):
         """Get detailed information about a specific drink."""
-        if not drink_key:
-            embed = await self.create_bar_embed("ℹ️ Drink Information", discord.Color.blue())
-            embed.description = "Use `~drink-info <drink>` to learn about a specific drink.\nExample: `~drink-info whiskey`"
+        try:
+            if not drink_key:
+                embed = await self.create_bar_embed("ℹ️ Drink Information", discord.Color.blue())
+                embed.description = "Use `~drink-info <drink>` to learn about a specific drink.\nExample: `~drink-info whiskey`"
+                await ctx.send(embed=embed)
+                return
+            
+            drink_key = drink_key.lower()
+            
+            if drink_key not in self.drinks:
+                embed = await self.create_bar_embed("❌ Drink Not Found", discord.Color.red())
+                embed.description = f"**{drink_key}** is not on our menu. Use `~drink` to see available drinks."
+                await ctx.send(embed=embed)
+                return
+            
+            drink = self.drinks[drink_key]
+            embed = await self.create_bar_embed(f"ℹ️ {drink['name']} Info", discord.Color.blue())
+            
+            embed.description = drink["description"]
+            
+            embed.add_field(name="💰 Price", value=self.format_money(drink["price"]), inline=True)
+            embed.add_field(name="🎯 Type", value=drink["type"].title(), inline=True)
+            embed.add_field(name="⭐ Rarity", value=drink["rarity"].title(), inline=True)
+            
+            # Effects
+            effects_text = ""
+            if drink["effects"]["intoxication"] > 0:
+                effects_text += f"🍺 Intoxication: +{drink['effects']['intoxication']}\n"
+            elif drink["effects"]["intoxication"] < 0:
+                effects_text += f"💧 Sobers: {abs(drink['effects']['intoxication'])}\n"
+            
+            if drink["effects"]["mood_boost"] > 0:
+                effects_text += f"😊 Mood Boost: +{drink['effects']['mood_boost']}\n"
+            
+            if effects_text:
+                embed.add_field(name="⚡ Effects", value=effects_text, inline=False)
+            
+            # Cooldown information
+            if drink.get("cooldown_multiplier", 1.0) > 1.0:
+                actual_cooldown = int(BartenderConfig.DRINK_COOLDOWN * drink["cooldown_multiplier"])
+                embed.add_field(name="⏰ Cooldown", value=f"{actual_cooldown}s (longer for strong drinks)", inline=False)
+            
+            # Check if user has tried this drink
+            user_data = await db.get_user(ctx.author.id)
+            drinks_tried = user_data.get("bar_data", {}).get("drinks_tried", [])
+            
+            if drink_key in drinks_tried:
+                embed.add_field(
+                    name="✅ Drink History", 
+                    value="You've tried this drink before!",
+                    inline=False
+                )
+            
             await ctx.send(embed=embed)
-            return
-        
-        drink_key = drink_key.lower()
-        
-        if drink_key not in self.drinks:
-            embed = await self.create_bar_embed("❌ Drink Not Found", discord.Color.red())
-            embed.description = f"**{drink_key}** is not on our menu. Use `~drink` to see available drinks."
-            await ctx.send(embed=embed)
-            return
-        
-        drink = self.drinks[drink_key]
-        embed = await self.create_bar_embed(f"ℹ️ {drink['name']} Info", discord.Color.blue())
-        
-        embed.description = drink["description"]
-        
-        embed.add_field(name="💰 Price", value=self.format_money(drink["price"]), inline=True)
-        embed.add_field(name="🎯 Type", value=drink["type"].title(), inline=True)
-        embed.add_field(name="⭐ Rarity", value=drink["rarity"].title(), inline=True)
-        
-        # Effects
-        effects_text = ""
-        if drink["effects"]["intoxication"] > 0:
-            effects_text += f"🍺 Intoxication: +{drink['effects']['intoxication']}\n"
-        elif drink["effects"]["intoxication"] < 0:
-            effects_text += f"💧 Sobers: {abs(drink['effects']['intoxication'])}\n"
-        
-        if drink["effects"]["mood_boost"] > 0:
-            effects_text += f"😊 Mood Boost: +{drink['effects']['mood_boost']}\n"
-        
-        if effects_text:
-            embed.add_field(name="⚡ Effects", value=effects_text, inline=False)
-        
-        # Cooldown information
-        if drink.get("cooldown_multiplier", 1.0) > 1.0:
-            actual_cooldown = int(BartenderConfig.DRINK_COOLDOWN * drink["cooldown_multiplier"])
-            embed.add_field(name="⏰ Cooldown", value=f"{actual_cooldown}s (longer for strong drinks)", inline=False)
-        
-        # Check if user has tried this drink
-        user_data = await db.get_user(ctx.author.id)
-        drinks_tried = user_data.get("bar_data", {}).get("drinks_tried", [])
-        
-        if drink_key in drinks_tried:
-            embed.add_field(
-                name="✅ Drink History", 
-                value="You've tried this drink before!",
-                inline=False
-            )
-        
-        await ctx.send(embed=embed)
+        except Exception as e:
+            await ErrorHandler.handle_command_error(ctx, e, "drink-info")
     
     @commands.command(name="my-drinks", aliases=["drink-history", "bar-tab", "mydrinks", "drinkhistory", "bartab"])
     async def my_drinks(self, ctx: commands.Context, member: discord.Member = None):
         """View your drink history and bar status with safety information."""
-        member = member or ctx.author
-        user_data = await db.get_user(member.id)
-        bar_data = user_data.get("bar_data", {})
-        
-        embed = await self.create_bar_embed(f"🍸 {member.display_name}'s Bar Profile")
-        embed.set_thumbnail(url=member.display_avatar.url)
-        
-        # Basic stats
-        total_drinks = bar_data.get("total_drinks_ordered", 0)
-        drinks_tried = bar_data.get("drinks_tried", [])
-        intoxication = await self.get_intoxication_level(member.id)
-        total_spent = bar_data.get("total_spent", 0)
-        
-        embed.add_field(
-            name="📊 Bar Stats",
-            value=(
-                f"**Total Drinks:** {total_drinks}\n"
-                f"**Unique Drinks:** {len(drinks_tried)}/{len(self.drinks)}\n"
-                f"**Total Spent:** {self.format_money(total_spent)}\n"
-                f"**Favorite:** {bar_data.get('favorite_drink', 'None yet')}\n"
-                f"**Tips Given:** {self.format_money(bar_data.get('tips_given', 0))}\n"
-                f"**Tips Received:** {self.format_money(bar_data.get('tips_received', 0))}"
-            ),
-            inline=True
-        )
-        
-        # Intoxication meter with safety information
-        intoxication_emoji = "😶" if intoxication == 0 else "😊" if intoxication < 3 else "🥴" if intoxication < 5 else "🤪" if intoxication < 8 else "💫" if intoxication < 10 else "🚑"
-        
-        safety_status = "🟢 Sober" if intoxication == 0 else \
-                       "🟡 Buzzed" if intoxication < 3 else \
-                       "🟠 Tipsy" if intoxication < 5 else \
-                       "🔴 Drunk" if intoxication < 8 else \
-                       "🚨 Danger" if intoxication < 10 else \
-                       "🏥 Emergency"
-        
-        embed.add_field(
-            name="🎭 Current State",
-            value=(
-                f"**Tipsy Level:** {intoxication_emoji} {intoxication}/10\n"
-                f"**Safety:** {safety_status}\n"
-                f"**Wallet:** {self.format_money(user_data['wallet'])}\n"
-                f"**Can afford:** {sum(1 for d in self.drinks.values() if d['price'] <= user_data['wallet'])} drinks"
-            ),
-            inline=True
-        )
-        
-        # Recently tried drinks (last 5)
-        if drinks_tried:
-            recent_drinks = drinks_tried[-5:] if len(drinks_tried) > 5 else drinks_tried
-            recent_text = "\n".join([self.drinks[d]["name"] for d in recent_drinks if d in self.drinks])
+        try:
+            member = member or ctx.author
+            user_data = await db.get_user(member.id)
+            bar_data = user_data.get("bar_data", {})
+            
+            embed = await self.create_bar_embed(f"🍸 {member.display_name}'s Bar Profile")
+            embed.set_thumbnail(url=member.display_avatar.url)
+            
+            # Basic stats
+            total_drinks = bar_data.get("total_drinks_ordered", 0)
+            drinks_tried = bar_data.get("drinks_tried", [])
+            intoxication = await self.get_intoxication_level(member.id)
+            total_spent = bar_data.get("total_spent", 0)
             
             embed.add_field(
-                name="🕐 Recently Tried",
-                value=recent_text or "None yet",
-                inline=False
+                name="📊 Bar Stats",
+                value=(
+                    f"**Total Drinks:** {total_drinks}\n"
+                    f"**Unique Drinks:** {len(drinks_tried)}/{len(self.drinks)}\n"
+                    f"**Total Spent:** {self.format_money(total_spent)}\n"
+                    f"**Favorite:** {bar_data.get('favorite_drink', 'None yet')}\n"
+                    f"**Tips Given:** {self.format_money(bar_data.get('tips_given', 0))}\n"
+                    f"**Tips Received:** {self.format_money(bar_data.get('tips_received', 0))}"
+                ),
+                inline=True
             )
-        
-        # Patron level based on drinks tried
-        patron_level = "🍶 Newcomer"
-        if len(drinks_tried) >= 10:
-            patron_level = "🍺 Regular 🥉"
-        if len(drinks_tried) >= 20:
-            patron_level = "🍷 VIP 🥈"  
-        if len(drinks_tried) >= 30:
-            patron_level = "🍾 Bar Legend 🥇"
-        
-        embed.add_field(
-            name="🏆 Patron Status",
-            value=patron_level,
-            inline=False
-        )
-        
-        # Safety warning if highly intoxicated
-        warning = self.get_intoxication_warning(intoxication)
-        if warning:
+            
+            # Intoxication meter with safety information
+            intoxication_emoji = "😶" if intoxication == 0 else "😊" if intoxication < 3 else "🥴" if intoxication < 5 else "🤪" if intoxication < 8 else "💫" if intoxication < 10 else "🚑"
+            
+            safety_status = "🟢 Sober" if intoxication == 0 else \
+                           "🟡 Buzzed" if intoxication < 3 else \
+                           "🟠 Tipsy" if intoxication < 5 else \
+                           "🔴 Drunk" if intoxication < 8 else \
+                           "🚨 Danger" if intoxication < 10 else \
+                           "🏥 Emergency"
+            
             embed.add_field(
-                name="🚨 Health Notice",
-                value=warning,
+                name="🎭 Current State",
+                value=(
+                    f"**Tipsy Level:** {intoxication_emoji} {intoxication}/10\n"
+                    f"**Safety:** {safety_status}\n"
+                    f"**Wallet:** {self.format_money(user_data['wallet'])}\n"
+                    f"**Can afford:** {sum(1 for d in self.drinks.values() if d['price'] <= user_data['wallet'])} drinks"
+                ),
+                inline=True
+            )
+            
+            # Recently tried drinks (last 5)
+            if drinks_tried:
+                recent_drinks = drinks_tried[-5:] if len(drinks_tried) > 5 else drinks_tried
+                recent_text = "\n".join([self.drinks[d]["name"] for d in recent_drinks if d in self.drinks])
+                
+                embed.add_field(
+                    name="🕐 Recently Tried",
+                    value=recent_text or "None yet",
+                    inline=False
+                )
+            
+            # Patron level based on drinks tried
+            patron_level = "🍶 Newcomer"
+            if len(drinks_tried) >= 10:
+                patron_level = "🍺 Regular 🥉"
+            if len(drinks_tried) >= 20:
+                patron_level = "🍷 VIP 🥈"  
+            if len(drinks_tried) >= 30:
+                patron_level = "🍾 Bar Legend 🥇"
+            
+            embed.add_field(
+                name="🏆 Patron Status",
+                value=patron_level,
                 inline=False
             )
-        
-        await ctx.send(embed=embed)
+            
+            # Safety warning if highly intoxicated
+            warning = self.get_intoxication_warning(intoxication)
+            if warning:
+                embed.add_field(
+                    name="🚨 Health Notice",
+                    value=warning,
+                    inline=False
+                )
+            
+            await ctx.send(embed=embed)
+        except Exception as e:
+            await ErrorHandler.handle_command_error(ctx, e, "my-drinks")
     
     @commands.command(name="sober-up", aliases=["sober", "water"])
     async def sober_up_command(self, ctx: commands.Context):
         """Order water to help sober up with cooldown."""
-        # Check cooldown for sober-up command
-        can_order, cooldown_remaining = await self.security_manager.check_drink_cooldown(ctx.author.id, "sober_up")
-        if not can_order:
-            embed = await self.create_bar_embed("⏰ Cooldown Active", discord.Color.orange())
-            embed.description = f"You can use sober-up again in {int(cooldown_remaining)} seconds."
-            await ctx.send(embed=embed)
-            return
-        
-        # Set cooldown
-        self.security_manager.set_drink_cooldown(ctx.author.id, "sober_up")
-        
-        # Order water
-        await self.order_drink(ctx, "water")
+        try:
+            # Check cooldown for sober-up command
+            can_order, cooldown_remaining = await self.security_manager.check_drink_cooldown(ctx.author.id, "sober_up")
+            if not can_order:
+                embed = await self.create_bar_embed("⏰ Cooldown Active", discord.Color.orange())
+                embed.description = f"You can use sober-up again in {int(cooldown_remaining)} seconds."
+                await ctx.send(embed=embed)
+                return
+            
+            # Set cooldown
+            self.security_manager.set_drink_cooldown(ctx.author.id, "sober_up")
+            
+            # Order water
+            await self.order_drink(ctx, "water")
+        except Exception as e:
+            await ErrorHandler.handle_command_error(ctx, e, "sober-up")
 
     @commands.command(name="drink-buy", aliases=["buy-drink", "gift-drink", "drinkbuy", "buydrink", "giftdrink"])
     async def buy_drink_for_user(self, ctx: commands.Context, member: discord.Member = None, drink_key: str = None):
         """Buy a drink for another user with security checks."""
-        if not member or not drink_key:
-            embed = await self.create_bar_embed("🍻 Buy a Drink for Someone", discord.Color.blue())
-            embed.description = "Buy a drink for a friend!\n\n**Usage:** `~drink-buy @user <drink>`\n**Example:** `~drink-buy @John beer`"
-            embed.add_field(
-                name="💡 Tip",
-                value="Use `~drink` to see available drinks and prices",
-                inline=False
-            )
+        try:
+            if not member or not drink_key:
+                embed = await self.create_bar_embed("🍻 Buy a Drink for Someone", discord.Color.blue())
+                embed.description = "Buy a drink for a friend!\n\n**Usage:** `~drink-buy @user <drink>`\n**Example:** `~drink-buy @John beer`"
+                embed.add_field(
+                    name="💡 Tip",
+                    value="Use `~drink` to see available drinks and prices",
+                    inline=False
+                )
+                await ctx.send(embed=embed)
+                return
+            
+            if member == ctx.author:
+                embed = await self.create_bar_embed("❌ Can't Buy Yourself a Drink", discord.Color.red())
+                embed.description = "You can't buy a drink for yourself! Use `~drink <drink>` to order for yourself."
+                await ctx.send(embed=embed)
+                return
+            
+            if member.bot:
+                embed = await self.create_bar_embed("❌ Can't Buy Bots Drinks", discord.Color.red())
+                embed.description = "Bots don't drink! Try buying for a real person."
+                await ctx.send(embed=embed)
+                return
+            
+            # Check gift cooldown
+            can_gift, cooldown_remaining = await self.security_manager.check_gift_cooldown(ctx.author.id)
+            if not can_gift:
+                embed = await self.create_bar_embed("⏰ Gift Cooldown", discord.Color.orange())
+                embed.description = f"You're sending gifts too quickly! Please wait {int(cooldown_remaining)} seconds."
+                await ctx.send(embed=embed)
+                return
+            
+            drink_key = drink_key.lower()
+            
+            if drink_key not in self.drinks:
+                embed = await self.create_bar_embed("❌ Drink Not Found", discord.Color.red())
+                embed.description = f"**{drink_key}** is not on the menu. Use `~drink` to see available drinks."
+                await ctx.send(embed=embed)
+                return
+            
+            drink = self.drinks[drink_key]
+            user_data = await db.get_user(ctx.author.id)
+            
+            # Check if user has enough money
+            if user_data["wallet"] < drink["price"]:
+                embed = await self.create_bar_embed("❌ Insufficient Funds", discord.Color.red())
+                embed.description = (
+                    f"{drink['name']} costs {self.format_money(drink['price'])}, "
+                    f"but you only have {self.format_money(user_data['wallet'])} in your wallet."
+                )
+                await ctx.send(embed=embed)
+                return
+            
+            # Check if recipient is too intoxicated for alcoholic drinks
+            recipient_intoxication = await self.get_intoxication_level(member.id)
+            if recipient_intoxication >= BartenderConfig.FORCE_SOBER_LEVEL and drink["effects"]["intoxication"] > 0:
+                embed = await self.create_bar_embed("🚫 Recipient Too Intoxicated", discord.Color.red())
+                embed.description = (
+                    f"{member.display_name} is too intoxicated for alcoholic drinks right now. "
+                    f"Consider buying them a non-alcoholic drink instead for their health."
+                )
+                await ctx.send(embed=embed)
+                return
+            
+            # Process the payment and drink gift
+            result = await db.update_balance(ctx.author.id, wallet_change=-drink["price"])
+            
+            # Update bar data for both users
+            await self.update_bar_data(ctx.author.id, {
+                "tips_given": user_data.get("bar_data", {}).get("tips_given", 0) + drink["price"]
+            })
+            
+            receiver_data = await db.get_user(member.id)
+            await self.update_bar_data(member.id, {
+                "tips_received": receiver_data.get("bar_data", {}).get("tips_received", 0) + drink["price"],
+                "total_drinks_ordered": receiver_data.get("bar_data", {}).get("total_drinks_ordered", 0) + 1
+            })
+            
+            # Apply drink effects to recipient (but don't allow them to get too drunk from gifts)
+            if drink["effects"]["intoxication"] > 0:
+                current_intoxication = await self.get_intoxication_level(member.id)
+                if current_intoxication < BartenderConfig.FORCE_SOBER_LEVEL:
+                    await self.apply_drink_effects(member.id, drink)
+            
+            # Add to receiver's drinks tried if new
+            drinks_tried = receiver_data.get("bar_data", {}).get("drinks_tried", [])
+            if drink_key not in drinks_tried:
+                drinks_tried.append(drink_key)
+                await self.update_bar_data(member.id, {"drinks_tried": drinks_tried})
+            
+            # Set gift cooldown
+            self.security_manager.set_gift_cooldown(ctx.author.id)
+            
+            # Create success embed
+            embed = await self.create_bar_embed("🎁 Drink Gift Sent!", discord.Color.green())
+            embed.description = f"You bought {member.mention} a {drink['name']}! 🍹"
+            
+            embed.add_field(name="💰 Cost", value=self.format_money(drink["price"]), inline=True)
+            embed.add_field(name="💵 Your Wallet", value=self.format_money(result["wallet"]), inline=True)
+            embed.add_field(name="🎁 For", value=member.display_name, inline=True)
+            
+            # Fun gift messages
+            gift_messages = [
+                f"Cheers to {member.display_name}! 🥂",
+                f"That's very generous of you! 💝",
+                f"What a great friend! 👏",
+                f"Spread the cheer! 🎉"
+            ]
+            
+            embed.set_footer(text=random.choice(gift_messages))
+            
             await ctx.send(embed=embed)
-            return
-        
-        if member == ctx.author:
-            embed = await self.create_bar_embed("❌ Can't Buy Yourself a Drink", discord.Color.red())
-            embed.description = "You can't buy a drink for yourself! Use `~drink <drink>` to order for yourself."
-            await ctx.send(embed=embed)
-            return
-        
-        if member.bot:
-            embed = await self.create_bar_embed("❌ Can't Buy Bots Drinks", discord.Color.red())
-            embed.description = "Bots don't drink! Try buying for a real person."
-            await ctx.send(embed=embed)
-            return
-        
-        # Check gift cooldown
-        can_gift, cooldown_remaining = await self.security_manager.check_gift_cooldown(ctx.author.id)
-        if not can_gift:
-            embed = await self.create_bar_embed("⏰ Gift Cooldown", discord.Color.orange())
-            embed.description = f"You're sending gifts too quickly! Please wait {int(cooldown_remaining)} seconds."
-            await ctx.send(embed=embed)
-            return
-        
-        drink_key = drink_key.lower()
-        
-        if drink_key not in self.drinks:
-            embed = await self.create_bar_embed("❌ Drink Not Found", discord.Color.red())
-            embed.description = f"**{drink_key}** is not on the menu. Use `~drink` to see available drinks."
-            await ctx.send(embed=embed)
-            return
-        
-        drink = self.drinks[drink_key]
-        user_data = await db.get_user(ctx.author.id)
-        
-        # Check if user has enough money
-        if user_data["wallet"] < drink["price"]:
-            embed = await self.create_bar_embed("❌ Insufficient Funds", discord.Color.red())
-            embed.description = (
-                f"{drink['name']} costs {self.format_money(drink['price'])}, "
-                f"but you only have {self.format_money(user_data['wallet'])} in your wallet."
-            )
-            await ctx.send(embed=embed)
-            return
-        
-        # Check if recipient is too intoxicated for alcoholic drinks
-        recipient_intoxication = await self.get_intoxication_level(member.id)
-        if recipient_intoxication >= BartenderConfig.FORCE_SOBER_LEVEL and drink["effects"]["intoxication"] > 0:
-            embed = await self.create_bar_embed("🚫 Recipient Too Intoxicated", discord.Color.red())
-            embed.description = (
-                f"{member.display_name} is too intoxicated for alcoholic drinks right now. "
-                f"Consider buying them a non-alcoholic drink instead for their health."
-            )
-            await ctx.send(embed=embed)
-            return
-        
-        # Process the payment and drink gift
-        result = await db.update_balance(ctx.author.id, wallet_change=-drink["price"])
-        
-        # Update bar data for both users
-        await self.update_bar_data(ctx.author.id, {
-            "tips_given": user_data.get("bar_data", {}).get("tips_given", 0) + drink["price"]
-        })
-        
-        receiver_data = await db.get_user(member.id)
-        await self.update_bar_data(member.id, {
-            "tips_received": receiver_data.get("bar_data", {}).get("tips_received", 0) + drink["price"],
-            "total_drinks_ordered": receiver_data.get("bar_data", {}).get("total_drinks_ordered", 0) + 1
-        })
-        
-        # Apply drink effects to recipient (but don't allow them to get too drunk from gifts)
-        if drink["effects"]["intoxication"] > 0:
-            current_intoxication = await self.get_intoxication_level(member.id)
-            if current_intoxication < BartenderConfig.FORCE_SOBER_LEVEL:
-                await self.apply_drink_effects(member.id, drink)
-        
-        # Add to receiver's drinks tried if new
-        drinks_tried = receiver_data.get("bar_data", {}).get("drinks_tried", [])
-        if drink_key not in drinks_tried:
-            drinks_tried.append(drink_key)
-            await self.update_bar_data(member.id, {"drinks_tried": drinks_tried})
-        
-        # Set gift cooldown
-        self.security_manager.set_gift_cooldown(ctx.author.id)
-        
-        # Create success embed
-        embed = await self.create_bar_embed("🎁 Drink Gift Sent!", discord.Color.green())
-        embed.description = f"You bought {member.mention} a {drink['name']}! 🍹"
-        
-        embed.add_field(name="💰 Cost", value=self.format_money(drink["price"]), inline=True)
-        embed.add_field(name="💵 Your Wallet", value=self.format_money(result["wallet"]), inline=True)
-        embed.add_field(name="🎁 For", value=member.display_name, inline=True)
-        
-        # Fun gift messages
-        gift_messages = [
-            f"Cheers to {member.display_name}! 🥂",
-            f"That's very generous of you! 💝",
-            f"What a great friend! 👏",
-            f"Spread the cheer! 🎉"
-        ]
-        
-        embed.set_footer(text=random.choice(gift_messages))
-        
-        await ctx.send(embed=embed)
+        except Exception as e:
+            await ErrorHandler.handle_command_error(ctx, e, "drink-buy")
 
 async def setup(bot):
     await bot.add_cog(BartenderCog(bot))
