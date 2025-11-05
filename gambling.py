@@ -80,10 +80,11 @@ class GamblingCog(commands.Cog):
         if user_data["wallet"] < bet:
             return False, f"You don't have enough money in your wallet. You have {self.format_money(user_data['wallet'])} but tried to bet {self.format_money(bet)}."
         
-        # Maximum bet limit for security
-        max_bet = min(100000, user_data["wallet_limit"] // 10)
+        # --- MODIFIED: Less restrictive bet limit ---
+        max_bet = min(250000, user_data["wallet_limit"] // 4) # Was min(100000, ... // 10)
         if bet > max_bet:
-            return False, f"Maximum bet allowed is {self.format_money(max_bet)} for security reasons."
+            return False, f"Maximum bet allowed is {self.format_money(max_bet)} (25% of wallet limit or 250,000£)."
+        # --- END MODIFICATION ---
         
         return True, "OK"
 
