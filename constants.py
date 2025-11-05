@@ -2,21 +2,21 @@
 # This file centralizes all configuration constants for your cogs.
 
 class EconomyConfig:
-    # --- Economy ---
+    # --- Economy (MODIFIED: Less Restrictive) ---
     STARTING_MONEY = 100
-    DEFAULT_WALLET_LIMIT = 10000
-    DEFAULT_BANK_LIMIT = 50000
+    DEFAULT_WALLET_LIMIT = 50000  # Was 10000
+    DEFAULT_BANK_LIMIT = 250000 # Was 50000
     
-    # --- Work ---
-    WORK_COOLDOWN = 3600  # 1 hour
-    WORK_MIN_EARN = 50
-    WORK_MAX_EARN = 300
+    # --- Work (MODIFIED: More rewarding, less cooldown) ---
+    WORK_COOLDOWN = 1800  # 30 minutes (was 3600)
+    WORK_MIN_EARN = 150   # Was 50
+    WORK_MAX_EARN = 500   # Was 300
     WORK_CRITICAL_CHANCE = 0.1  # 10%
     
-    # --- Daily ---
-    DAILY_REWARD = 500
-    DAILY_COOLDOWN = 86400  # 24 hours
-    DAILY_STREAK_BONUS = 100  # Extra 100 per streak day
+    # --- Daily (MODIFIED: More rewarding) ---
+    DAILY_REWARD = 1000         # Was 500
+    DAILY_COOLDOWN = 86400      # 24 hours
+    DAILY_STREAK_BONUS = 250    # Was 100
 
 class BartenderConfig:
     # --- Cooldowns ---
