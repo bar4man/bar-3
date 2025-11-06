@@ -464,6 +464,13 @@ class MarketCog(commands.Cog):
         self.announcement_channel_id = None
         logging.info("✅ Market system initialized with security features")
     
+    # --- *** FIX *** ---
+    # Added the missing helper function
+    def format_money(self, amount: int) -> str:
+        """Format money with commas and currency symbol."""
+        return f"{amount:,}£"
+    # --- *** END OF FIX *** ---
+    
     def cog_unload(self):
         """Cleanup tasks when cog is unloaded."""
         self.price_update_task.cancel()
