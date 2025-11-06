@@ -288,6 +288,7 @@ class SecurityManager:
         """Sanitize moderation reasons."""
         if not reason:
             return "No reason provided"
+            sanitized = reason
         
         # Remove dangerous content
         dangerous_patterns = ["sanitized = reason"]
@@ -1047,4 +1048,5 @@ if __name__ == "__main__":
         logging.critical("❌ Invalid Discord token")
     except Exception as e:
         logging.critical(f"❌ Failed to start bot: {e}")
+
 
