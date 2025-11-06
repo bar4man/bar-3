@@ -94,7 +94,7 @@ class ConfigManager:
         try:
             validated_data = {**self.default_config, **data}
             async with aiofiles.open(self.filename, "w") as f:
-                await f.write(json.dumps(validated_data, f, indent=2, ensure_ascii=False))
+                await f.write(json.dumps(validated_data, indent=2, ensure_ascii=False)) # Fixed: removed extra 'f'
             logging.info("Config saved successfully")
             return True
         except Exception as e:
@@ -172,7 +172,8 @@ class MessageFilter:
         
         # Remove users with no recent activity
         for user_id in users_to_remove:
-            del self.spam_tracker[user_id]
+            if user_id in self.spam_tracker: # Check if exists before deleting
+                del self.spam_tracker[user_id]
         
         if users_to_remove:
             logging.debug(f"🧹 Cleaned up {len(users_to_remove)} inactive users from spam tracker")
@@ -289,8 +290,7 @@ class SecurityManager:
             return "No reason provided"
         
         # Remove dangerous content
-        dangerous_patterns = ["```", "`", "@everyone", "@here", "http://", "https://", "discord.gg/"]
-        sanitized = reason
+        dangerous_patterns = ["sanitized = reason
         
         for pattern in dangerous_patterns:
             sanitized = sanitized.replace(pattern, "")
@@ -655,7 +655,7 @@ async def _show_admin_help(ctx: commands.Context):
     
     # Bot Management
     bot_cmds = [
-        "`reloadcogs` - Reload all cogs",
+        "`reload` - Reload all cogs",
         "`setstatus <status>` - Change bot status"
     ]
     
@@ -694,12 +694,9 @@ async def _show_economy_help(ctx: commands.Context):
     # Balance Management
     balance_cmds = [
         "`balance [member]` - Check balance",
-        "`wallet [member]` - Check wallet only", 
-        "`bank [member]` - Check bank only",
-        "`networth [member]` - Check total net worth",
         "`deposit <amount|all|max>` - Deposit to bank",
         "`withdraw <amount|all>` - Withdraw from bank",
-        "`upgrade <wallet/bank>` - Upgrade limits"
+        "`pay <member> <amount>` - Pay another user"
     ]
     
     embed.add_field(
@@ -711,7 +708,7 @@ async def _show_economy_help(ctx: commands.Context):
     # Earning Commands
     earning_cmds = [
         "`daily` - Claim daily reward (24h cooldown)",
-        "`work` - Work for money (1h cooldown)",
+        "`work` - Work for money (30m cooldown)",
         "`beg` - Beg for small amounts of money (5min cooldown)"
     ]
     
@@ -727,7 +724,7 @@ async def _show_economy_help(ctx: commands.Context):
         "`buy <item_id>` - Purchase an item", 
         "`inventory` - View your inventory",
         "`use <item_id>` - Use an item",
-        "`pay <member> <amount>` - Pay another user"
+        "`upgrade <wallet/bank>` - Easily buy upgrades"
     ]
     
     embed.add_field(
@@ -739,17 +736,15 @@ async def _show_economy_help(ctx: commands.Context):
     embed.add_field(
         name="💡 Important Notes",
         value=(
-            "• **Shop purchases use BANK money**\n"
-            "• **Payments use WALLET money**\n"
-            "• **Excess money is protected** - moved to bank when possible\n"
-            "• **Penalty:** Lose 1£ for impossible deposits\n"
-            "• Use `~deposit` to move money to bank\n"
-            "• Use `~withdraw` to get money from bank"
+            "• **Shop/Upgrades use BANK money**\n"
+            "• **Payments/Games use WALLET money**\n"
+            "• **Rewards go to your WALLET**\n"
+            "• Use `~deposit` to keep your wallet safe!"
         ),
         inline=False
     )
     
-    embed.set_footer(text="Most commands have cooldowns - check individual command help")
+    embed.set_footer(text="Rewards and limits have been increased!")
     await ctx.send(embed=embed)
 
 async def _show_markets_help(ctx: commands.Context):
@@ -764,9 +759,7 @@ async def _show_markets_help(ctx: commands.Context):
     info_cmds = [
         "`market` - View current market status",
         "`stocks [symbol]` - View stock information",
-        "`gold` - View gold market information",
-        "`news` - View market news and events",
-        "`topmovers` - View today's biggest stock movements"
+        "`gold` - View gold market information"
     ]
     
     embed.add_field(
@@ -780,9 +773,7 @@ async def _show_markets_help(ctx: commands.Context):
         "`buyinvest stock <symbol> <shares>` - Buy stock shares",
         "`buyinvest gold <ounces>` - Buy gold ounces", 
         "`sellinvest stock <symbol> <shares>` - Sell stock shares",
-        "`sellinvest gold <ounces>` - Sell gold ounces",
-        "`ibuy` - Shortcut for buyinvest",
-        "`isell` - Shortcut for sellinvest"
+        "`sellinvest gold <ounces>` - Sell gold ounces"
     ]
     
     embed.add_field(
@@ -794,7 +785,6 @@ async def _show_markets_help(ctx: commands.Context):
     # Portfolio Management
     portfolio_cmds = [
         "`portfolio [member]` - View investment portfolio",
-        "`port [member]` - Shortcut for portfolio"
     ]
     
     embed.add_field(
@@ -816,10 +806,8 @@ async def _show_markets_help(ctx: commands.Context):
         name="💡 Trading Information",
         value=(
             "• **Market Hours:** 9 AM - 5 PM UTC\n"
-            "• **Stock Fees:** 0.5% per transaction\n"
-            "• **Gold Fees:** 1% per transaction\n"
-            "• **Funding:** All trades use BANK money\n"
-            "• **Portfolio:** Track your investments with `~portfolio`"
+            "• **All trades use BANK money**\n"
+            "• **Limits are much higher!** (e.g., 50k stocks)"
         ),
         inline=False
     )
@@ -837,12 +825,11 @@ async def _show_gambling_help(ctx: commands.Context):
     
     # Gambling Games
     gambling_cmds = [
-        "`flip <heads/tails> <bet>` - Coin flip (55% win chance, 1.8x payout)",
-        "`dice <bet>` - Dice game (50% win chance, multiple payouts)",
-        "`slots <bet>` - Slot machine (better odds, two-matching wins)",
-        "`rps <rock/paper/scissors> <bet>` - Rock Paper Scissors (2x win, tie returns bet)",
-        "`highlow <bet>` - High-Low card game (2x payout)",
-        "`beg` - Beg for money (5min cooldown)"
+        "`flip <heads/tails> <bet>` - Coin flip (60% win, 1.9x payout)",
+        "`dice <bet>` - Dice game (Win on 3-6, up to 6x payout)",
+        "`slots <bet>` - Slot machine (Better odds, 1.5x for two)",
+        "`rps <rock/paper/scissors> <bet>` - Rock Paper Scissors (2.2x win)",
+        "`beg` - Beg for money (50-150£)"
     ]
     
     embed.add_field(
@@ -851,46 +838,9 @@ async def _show_gambling_help(ctx: commands.Context):
         inline=False
     )
     
-    # Game Details
-    embed.add_field(
-        name="💰 Coin Flip",
-        value="**Win Chance:** 55%\n**Payout:** 1.8x your bet\n**Cooldown:** 3 seconds",
-        inline=True
-    )
-    
-    embed.add_field(
-        name="🎯 Dice Game", 
-        value="**Winning Numbers:** 4, 5, 6\n**Payouts:** 1.5x, 2x, 5x\n**Cooldown:** 4 seconds",
-        inline=True
-    )
-    
-    embed.add_field(
-        name="🎰 Slots",
-        value="**Three Matching:** Up to 30x\n**Two Matching:** 1.2x\n**Cooldown:** 5 seconds",
-        inline=True
-    )
-    
-    embed.add_field(
-        name="✂️ Rock Paper Scissors",
-        value="**Win:** 2x your bet\n**Tie:** Return your bet\n**Lose:** Lose your bet\n**Cooldown:** 3 seconds",
-        inline=True
-    )
-    
-    embed.add_field(
-        name="🎴 High-Low",
-        value="**Win:** 2x your bet\n**Lose:** Lose your bet\n**Timeout:** Return bet\n**Cooldown:** 4 seconds",
-        inline=True
-    )
-    
-    embed.add_field(
-        name="🙏 Begging",
-        value="**Amount:** 10-70£ randomly\n**Cooldown:** 5 minutes\n**Success Rate:** High",
-        inline=True
-    )
-    
     embed.add_field(
         name="💡 Tips",
-        value="• All games use WALLET money\n• Items can boost your chances\n• Don't bet more than you can afford!",
+        value="• All games use WALLET money\n• Odds & payouts have been buffed!\n• Don't bet more than you can afford!",
         inline=True
     )
     
@@ -923,8 +873,6 @@ async def _show_bartender_help(ctx: commands.Context):
     # Social Commands
     social_cmds = [
         "`~drink-buy <user> <drink>` - Buy a drink for someone",
-        "`~toast` - Start a group toast (coming soon)",
-        "`~cheers` - Cheer with everyone (coming soon)"
     ]
     
     embed.add_field(
@@ -938,11 +886,8 @@ async def _show_bartender_help(ctx: commands.Context):
         name="💡 Bar Information",
         value=(
             "• **All drinks use WALLET money**\n"
-            "• **Drink prices:** 20-500£\n"
-            "• **Tipsy meter:** Tracks your intoxication (max 10)\n"
-            "• **Water helps sober up**\n"
-            "• **Drink cooldowns:** 30 seconds between same drinks\n"
-            "• **Try different drinks** to build your collection!"
+            "• **Cooldowns are much shorter!**\n"
+            "• **Sobering is 2x faster!**"
         ),
         inline=False
     )
@@ -999,7 +944,7 @@ async def load_cogs():
 
 async def reload_cogs():
     """Reload all cogs."""
-    cogs = ["admin", "economy", "market", "gambling", "bartender"]
+    cogs = ["admin", "economy","market", "gambling", "bartender"]
     for cog in cogs:
         try:
             await bot.reload_extension(cog)
@@ -1021,28 +966,20 @@ async def setup_hook():
     
     for filename, default_content in required_files.items():
         if not os.path.exists(filename):
-            with open(filename, "w") as f:
-                f.write(default_content)
-            logging.info(f"📁 Created {filename}")
+            try:
+                async with aiofiles.open(filename, "w") as f:
+                    await f.write(default_content)
+                logging.info(f"📁 Created {filename}")
+            except Exception as e:
+                logging.error(f"Failed to create {filename}: {e}")
     
     await load_cogs()
     auto_cleaner.start()
     
     logging.info("✅ Setup hook completed")
 
-@bot.event
-async def on_ready():
-    """Enhanced on_ready with more detailed startup info."""
-    logging.info(f"✅ Bot is ready as {bot.user} (ID: {bot.user.id})")
-    logging.info(f"📊 Connected to {len(bot.guilds)} guild(s)")
-    
-    await bot.change_presence(
-        activity=discord.Activity(
-            type=discord.ActivityType.watching,
-            name="~help | Economy & Bar"
-        ),
-        status=discord.Status.online
-    )
+# --- BUG FIX: Removed redundant on_ready event ---
+# The on_ready logic is already handled inside the Bot class
 
 @bot.event
 async def on_guild_join(guild):
