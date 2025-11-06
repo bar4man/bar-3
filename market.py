@@ -14,15 +14,11 @@ class MarketConfig:
     TRADING_HOURS = {"open": 9, "close": 17}  # 9 AM - 5 PM UTC
     BASE_VOLATILITY = 0.02
     MAX_VOLATILITY = 0.05
-    NEWS_COOLDOWN = 300  # 5 minutes
-    
-    # --- MODIFIED: Less Restrictive Limits ---
-    MAX_STOCK_ORDER = 50000  # Was 10000
-    MAX_GOLD_ORDER = 5000    # Was 1000
-    MAX_PORTFOLIO_SIZE = 20  # Was 10
-    # --- END MODIFICATION ---
-
-    NEWS_IMPACT_MULTIPLIER = 0.5
+    NEWS_COOLDOWN = 180  # 3 minutes (Less restrictive)
+    MAX_STOCK_ORDER = 50000  # (Less restrictive)
+    MAX_GOLD_ORDER = 5000    # (Less restrictive)
+    MAX_PORTFOLIO_SIZE = 20  # (Less restrictive)
+    NEWS_IMPACT_MULTIPLIER = 0.75 # (More impactful)
     MIN_GOLD_PRICE = 1500
     MAX_GOLD_PRICE = 2500
     STOCK_MIN_RATIO = 0.5
@@ -50,13 +46,11 @@ class MarketSecurityManager:
         if now - self.trade_limits[key]["last_reset"] > 86400:  # 24 hours
             self.trade_limits[key] = {"count": 0, "last_reset": now, "volume": 0}
         
-        # --- MODIFIED: Less Restrictive Limits ---
-        # Check trade count limit (max 200 trades per day per asset type)
-        if self.trade_limits[key]["count"] >= 200: # Was 100
-            return False, "Daily trade limit reached for this asset type (200 trades)" # Was 100
-        # --- END MODIFICATION ---
+        # Check trade count limit (max 250 trades per day per asset type)
+        if self.trade_limits[key]["count"] >= 250: # (Less restrictive)
+            return False, "Daily trade limit reached for this asset type (250 trades)"
         
-        # Check volume limits (using MarketConfig)
+        # Check volume limits
         if asset_type == "stock" and amount > MarketConfig.MAX_STOCK_ORDER:
             return False, f"Cannot trade more than {MarketConfig.MAX_STOCK_ORDER:,} shares at once"
         
@@ -71,11 +65,9 @@ class MarketSecurityManager:
         # Remove old trades (last 5 minutes)
         self.suspicious_activity[rapid_key] = [t for t in self.suspicious_activity[rapid_key] if now - t < 300]
         
-        # --- MODIFIED: Less Restrictive Limits ---
-        # Check if trading too rapidly (more than 20 trades in 5 minutes)
-        if len(self.suspicious_activity[rapid_key]) >= 20: # Was 10
-            return False, "Trading too rapidly. Please slow down (20 trades / 5 min)." # Was 10
-        # --- END MODIFICATION ---
+        # Check if trading too rapidly (more than 25 trades in 5 minutes)
+        if len(self.suspicious_activity[rapid_key]) >= 25: # (Less restrictive)
+            return False, "Trading too rapidly. Please slow down to prevent market manipulation."
         
         self.suspicious_activity[rapid_key].append(now)
         self.trade_limits[key]["count"] += 1
@@ -131,7 +123,6 @@ class MarketSecurityManager:
         if new_symbol and new_symbol not in portfolio.get("stocks", {}):
             stocks_count += 1
         
-        # Uses the modified limit from MarketConfig
         if stocks_count > MarketConfig.MAX_PORTFOLIO_SIZE:
             return False, f"Cannot hold more than {MarketConfig.MAX_PORTFOLIO_SIZE} different stocks"
         
@@ -353,18 +344,13 @@ class MarketSystem:
     
     def update_prices(self):
         """Optimized price updates with pre-calculated news impacts."""
-        
-        # --- *** THIS IS THE BUG FIX *** ---
-        # The original code had 'if not self.market.market_open:'.
-        # Inside the MarketSystem class, 'self' *is* the market system.
-        # It should check its *own* market_open attribute.
-        # This bug would cause an AttributeError and stop price updates.
+        # --- *** BUG FIX *** ---
+        # The original code had `if not self.market.market_open:`
+        # `self` (MarketSystem) doesn't have a `market` attribute.
+        # It should check its *own* `market_open` attribute.
         if not self.market_open:
-            # This check is technically redundant since the calling task
-            # (update_market_prices) already checks, but it's safer
-            # and now it's correct.
             return
-        # --- *** END OF BUG FIX *** ---
+        # --- *** END OF FIX *** ---
             
         sentiment = self.calculate_market_sentiment()
         
@@ -492,7 +478,7 @@ class MarketCog(commands.Cog):
                 self.market.update_prices()
                 logging.debug("📈 Market prices updated")
             except Exception as e:
-                logging.error(f"Error in market price update task: {e}", exc_info=True)
+                logging.error(f"Error in market price update loop: {e}")
     
     @tasks.loop(minutes=1)
     async def manage_market_hours(self):
@@ -501,7 +487,7 @@ class MarketCog(commands.Cog):
             now = datetime.now(timezone.utc)
             current_hour = now.hour
             
-            # Market hours: 9 AM to 5 PM UTC
+            # Market hours: 9 AM to 5 PM UTC, with pre/after market
             if MarketConfig.TRADING_HOURS["open"] <= current_hour < MarketConfig.TRADING_HOURS["close"]:
                 if not self.market.market_open:
                     self.market.market_open = True
@@ -524,9 +510,8 @@ class MarketCog(commands.Cog):
                     # Send market close announcement with daily summary
                     await self.send_market_announcement("🔔 **Market Closed**\nTrading has ended for the day.")
         except Exception as e:
-            logging.error(f"Error in manage_market_hours task: {e}", exc_info=True)
+            logging.error(f"Error in market hours management: {e}")
 
-    
     @tasks.loop(minutes=30)
     async def announce_market_news(self):
         """Announce market news periodically."""
@@ -558,21 +543,6 @@ class MarketCog(commands.Cog):
             except Exception as e:
                 logging.error(f"Error announcing market news: {e}")
     
-    @announce_market_news.before_loop
-    async def before_announce_market_news(self):
-        """Wait for bot to be ready before starting task."""
-        await self.bot.wait_until_ready()
-
-    @update_market_prices.before_loop
-    async def before_update_market_prices(self):
-        """Wait for bot to be ready before starting task."""
-        await self.bot.wait_until_ready()
-
-    @manage_market_hours.before_loop
-    async def before_manage_market_hours(self):
-        """Wait for bot to be ready before starting task."""
-        await self.bot.wait_until_ready()
-
     async def send_market_announcement(self, message: str):
         """Send market announcement to the designated channel."""
         if self.announcement_channel_id:
@@ -582,6 +552,19 @@ class MarketCog(commands.Cog):
                     await channel.send(message)
             except Exception as e:
                 logging.error(f"Error sending market announcement: {e}")
+
+    @update_market_prices.before_loop
+    async def before_market_updates(self):
+        await self.bot.wait_until_ready()
+
+    @manage_market_hours.before_loop
+    async def before_market_hours(self):
+        await self.bot.wait_until_ready()
+
+    @announce_market_news.before_loop
+    async def before_market_news(self):
+        await self.bot.wait_until_ready()
+
     
     @commands.command(name="market", aliases=["mkt"])
     async def market_status(self, ctx: commands.Context):
@@ -762,30 +745,19 @@ class MarketCog(commands.Cog):
     # -------------------- NEW TRADING COMMANDS --------------------
 
     @commands.command(name="buyinvest", aliases=["ibuy"])
-    async def buy_invest(self, ctx: commands.Context, asset_type: str, symbol_or_ounces: str, amount: float):
-        """Buy stocks or gold. Usage: ~buyinvest <stock/gold> <SYMBOL/amount> <amount>"""
-        # Note: Signature changed amount: int -> amount: float to support gold
+    async def buy_invest(self, ctx: commands.Context, asset_type: str, symbol_or_ounces: str, amount: int):
+        """Buy stocks or gold. Usage: ~buyinvest <stock/gold> <SYMBOL/ounces> <amount>"""
         try:
             asset_type = asset_type.lower()
             
             if not self.market.market_open and asset_type == "stock":
-                await ErrorHandler.handle_command_error(ctx, Exception("market_closed"), "buyinvest")
+                # Using a custom error message instead of the full handler for a cleaner response
+                embed = discord.Embed(title="🏛️ Market Closed", description="The stock market is currently closed. Trading hours are 9:00 - 17:00 UTC.", color=discord.Color.red())
+                await ctx.send(embed=embed)
                 return
             
             if amount <= 0:
                 return await ctx.send("Amount must be greater than 0.")
-            
-            # --- MODIFICATION: Handle int for stocks, float for gold ---
-            if asset_type == "stock":
-                if amount != int(amount):
-                    return await ctx.send("Stock shares must be a whole number (e.g., 10, 50).")
-                amount = int(amount)
-            # --- END MODIFICATION ---
-
-            # Security check for trade limits
-            is_valid_trade, trade_error = await self.security_manager.check_trade_limit(ctx.author.id, asset_type, amount)
-            if not is_valid_trade:
-                return await ctx.send(f"❌ Trade Denied: {trade_error}")
                 
             user_data = await db.get_user(ctx.author.id)
             total_cost = 0
@@ -799,13 +771,12 @@ class MarketCog(commands.Cog):
                 portfolio = user_data.get("portfolio", {})
                 is_valid_size, size_error = self.security_manager.validate_portfolio_size(portfolio, new_symbol=symbol)
                 if not is_valid_size:
-                    return await ctx.send(f"❌ Portfolio Limit: {size_error}")
+                    return await ctx.send(size_error)
                 
                 stock = self.market.stocks[symbol]
                 total_cost = stock["price"] * amount
                 
             elif asset_type == "gold":
-                symbol = "GOLD" # Use a consistent symbol for messages
                 total_cost = self.market.gold_price * amount
                 
             else:
@@ -851,30 +822,18 @@ class MarketCog(commands.Cog):
             await ErrorHandler.handle_command_error(ctx, e, "buyinvest")
 
     @commands.command(name="sellinvest", aliases=["isell"])
-    async def sell_invest(self, ctx: commands.Context, asset_type: str, symbol_or_ounces: str, amount: float):
-        """Sell stocks or gold. Usage: ~sellinvest <stock/gold> <SYMBOL/amount> <amount>"""
-        # Note: Signature changed amount: int -> amount: float to support gold
+    async def sell_invest(self, ctx: commands.Context, asset_type: str, symbol_or_ounces: str, amount: int):
+        """Sell stocks or gold. Usage: ~sellinvest <stock/gold> <SYMBOL/ounces> <amount>"""
         try:
             asset_type = asset_type.lower()
             
             if not self.market.market_open and asset_type == "stock":
-                await ErrorHandler.handle_command_error(ctx, Exception("market_closed"), "sellinvest")
+                embed = discord.Embed(title="🏛️ Market Closed", description="The stock market is currently closed. Trading hours are 9:00 - 17:00 UTC.", color=discord.Color.red())
+                await ctx.send(embed=embed)
                 return
                 
             if amount <= 0:
                 return await ctx.send("Amount must be greater than 0.")
-            
-            # --- MODIFICATION: Handle int for stocks, float for gold ---
-            if asset_type == "stock":
-                if amount != int(amount):
-                    return await ctx.send("Stock shares must be a whole number (e.g., 10, 50).")
-                amount = int(amount)
-            # --- END MODIFICATION ---
-
-            # Security check for trade limits
-            is_valid_trade, trade_error = await self.security_manager.check_trade_limit(ctx.author.id, asset_type, amount)
-            if not is_valid_trade:
-                return await ctx.send(f"❌ Trade Denied: {trade_error}")
                 
             user_data = await db.get_user(ctx.author.id)
             user_portfolio = user_data.get("portfolio", db._get_default_user(0)["portfolio"])
@@ -926,9 +885,9 @@ class MarketCog(commands.Cog):
         except Exception as e:
             await ErrorHandler.handle_command_error(ctx, e, "sellinvest")
 
-    @commands.command(name="portfolio", aliases=["port"])
+    @commands.command(name="portfolio", aliases=["port", "investments"])
     async def portfolio(self, ctx: commands.Context, member: discord.Member = None):
-        """View your or another user's investment portfolio."""
+        """View your investment portfolio."""
         try:
             member = member or ctx.author
             user_data = await db.get_user(member.id)
@@ -936,68 +895,59 @@ class MarketCog(commands.Cog):
 
             embed = discord.Embed(
                 title=f"💼 {member.display_name}'s Portfolio",
-                color=discord.Color.green(),
+                color=discord.Color.purple(),
                 timestamp=datetime.now(timezone.utc)
             )
             embed.set_thumbnail(url=member.display_avatar.url)
 
-            total_portfolio_value = 0
-            total_pnl = 0
-            
-            # --- 1. Gold Holdings ---
+            total_value = 0
+            total_investment = 0 # We'll need to calculate this properly
+
+            # Gold Holdings
             gold_ounces = portfolio.get("gold_ounces", 0.0)
             if gold_ounces > 0:
-                current_gold_value = self.market.gold_price * gold_ounces
-                total_portfolio_value += current_gold_value
+                gold_value = gold_ounces * self.market.gold_price
+                total_value += gold_value
                 embed.add_field(
-                    name="🥇 Gold",
-                    value=f"{gold_ounces:,.2f} oz @ ${self.market.gold_price:,.2f}/oz\n**Value:** {current_gold_value:,.2f}£",
-                    inline=False
+                    name="🥇 Gold Holdings",
+                    value=f"{gold_ounces:,.2f} oz\n**Value:** {self.format_money(int(gold_value))}",
+                    inline=True
                 )
 
-            # --- 2. Stock Holdings ---
-            stock_holdings = portfolio.get("stocks", {})
-            if stock_holdings:
-                stocks_text = ""
-                for symbol, holding in stock_holdings.items():
-                    if symbol not in self.market.stocks:
-                        continue
+            # Stock Holdings
+            stock_str = ""
+            stocks = portfolio.get("stocks", {})
+            if not stocks:
+                stock_str = "No stocks owned."
+            else:
+                for symbol, data in stocks.items():
+                    if symbol in self.market.stocks:
+                        current_price = self.market.stocks[symbol]["price"]
+                        current_value = data["shares"] * current_price
+                        avg_price = data["avg_price"]
+                        pnl = (current_price - avg_price) * data["shares"]
+                        pnl_emoji = "📈" if pnl > 0 else "📉" if pnl < 0 else "➡️"
+                        
+                        total_value += current_value
+                        
+                        stock_str += (
+                            f"**{symbol}** ({data['shares']:,} shares)\n"
+                            f"Value: {self.format_money(int(current_value))}\n"
+                            f"Avg. Buy: ${avg_price:,.2f}\n"
+                            f"P/L: {pnl_emoji} {self.format_money(int(pnl))}\n"
+                            f"-----------------\n"
+                        )
                     
-                    current_price = self.market.stocks[symbol]["price"]
-                    current_value = current_price * holding["shares"]
-                    avg_price = holding["avg_price"]
-                    pnl = (current_price - avg_price) * holding["shares"]
-                    pnl_percent = ((current_price - avg_price) / avg_price) * 100 if avg_price > 0 else 0
-                    
-                    total_portfolio_value += current_value
-                    total_pnl += pnl
-                    
-                    pnl_emoji = "📈" if pnl > 0 else "📉"
-                    stocks_text += (
-                        f"**{symbol}**: {holding['shares']:,} shares @ ${current_price:,.2f}\n"
-                        f"  **Value**: {current_value:,.2f}£\n"
-                        f"  **P/L**: {pnl_emoji} {pnl:,.2f}£ ({pnl_percent:+.2f}%)\n"
-                    )
-                
-                if stocks_text:
-                    embed.add_field(
-                        name="📈 Stocks",
-                        value=stocks_text,
-                        inline=False
-                    )
+            embed.add_field(name="📈 Stock Holdings", value=stock_str, inline=False)
             
-            if not stock_holdings and gold_ounces == 0:
-                embed.description = "This portfolio is empty.\nUse `~buyinvest` to get started!"
-
-            # --- 3. Summary ---
+            # Summary
             embed.add_field(
-                name="--- Summary ---",
-                value=f"**Total Portfolio Value**: {total_portfolio_value:,.2f}£\n"
-                      f"**Total Stock P/L**: {total_pnl:,.2f}£",
+                name="💰 Total Portfolio Value",
+                value=self.format_money(int(total_value)),
                 inline=False
             )
             
-            embed.set_footer(text="Portfolio values update with the market.")
+            embed.set_footer(text="Use ~buyinvest and ~sellinvest to trade.")
             await ctx.send(embed=embed)
 
         except Exception as e:
