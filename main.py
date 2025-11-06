@@ -290,7 +290,7 @@ class SecurityManager:
             return "No reason provided"
         
         # Remove dangerous content
-        dangerous_patterns = ["sanitized = reason
+        dangerous_patterns = ["sanitized = reason"]
         
         for pattern in dangerous_patterns:
             sanitized = sanitized.replace(pattern, "")
@@ -1047,3 +1047,4 @@ if __name__ == "__main__":
         logging.critical("❌ Invalid Discord token")
     except Exception as e:
         logging.critical(f"❌ Failed to start bot: {e}")
+
