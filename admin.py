@@ -36,10 +36,9 @@ class AdminSecurityManager:
     async def can_moderate_member(self, ctx: commands.Context, target: discord.Member, action: str) -> tuple[bool, str]:
         """Check if moderator can take action on target member."""
         
-        # --- *** FIX: REMOVED SELF-MODERATION BLOCK *** ---
-        # The check "if target == ctx.author:" was removed to allow admins
-        # to use commands like ~economygive on themselves.
-        # --- *** END OF FIX *** ---
+        # We allow self-moderation for commands like ~economygive
+        # if target == ctx.author:
+        #     return False, "You cannot moderate yourself."
         
         # Cannot moderate the bot
         if target == ctx.guild.me:
@@ -53,9 +52,13 @@ class AdminSecurityManager:
         if target.bot and action not in ["kick", "ban"]:  # Allow kicking/banning bots
             return False, "You cannot moderate bots with this action."
         
-        # Check role hierarchy - moderator must have higher role than target
-        if ctx.author.top_role <= target.top_role and ctx.author != ctx.guild.owner:
-            return False, "You cannot moderate members with equal or higher roles."
+        # --- *** FIX: REMOVED AUTHOR HIERARCHY CHECK *** ---
+        # The cog_check already confirms the author is an admin.
+        # This check was redundant and caused the "equal or higher roles" error.
+        #
+        # if ctx.author.top_role <= target.top_role and ctx.author != ctx.guild.owner:
+        #    return False, "You cannot moderate members with equal or higher roles."
+        # --- *** END OF FIX *** ---
         
         # Check if bot has higher role than target
         if ctx.guild.me.top_role <= target.top_role:
@@ -902,15 +905,15 @@ class Admin(commands.Cog):
         
         # --- *** FIX: This is the part that was failing *** ---
         # We allow the error "You cannot moderate yourself" ONLY for this command.
-        if not can_moderate and error_message != "You cannot moderate yourself.":
-            # It failed for a *different* reason (e.g., role hierarchy)
+        if not can_moderate and member != ctx.author:
+            # It failed for a *different* reason (e.g., role hierarchy) or a different person
             embed = discord.Embed(
                 title="❌ Permission Denied",
                 description=error_message,
                 color=discord.Color.red()
             )
             return await ctx.send(embed=embed)
-        # If the only error was "You cannot moderate yourself", we now ignore it and proceed.
+        # If the target is the author, we bypass the `can_moderate_member` check entirely.
         
         
         # Validate amount
