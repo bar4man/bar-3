@@ -724,16 +724,18 @@ class Admin(commands.Cog):
     @commands.command(name="clear", aliases=["purge", "clean"])
     async def clear(self, ctx: commands.Context, amount: int = 10):
         """Delete messages from channel with enhanced security and limits."""
-        # Security validation
-        can_moderate, error_message = await self.security_manager.can_moderate_member(ctx, ctx.guild.me, "clear")
-        if not can_moderate:
+        # --- *** BUG FIX *** ---
+        # Replaced the faulty security check with a direct permission check
+        bot_permissions = ctx.channel.permissions_for(ctx.guild.me)
+        if not bot_permissions.manage_messages:
             embed = discord.Embed(
-                title="❌ Permission Denied",
-                description=error_message,
+                title="❌ Bot Missing Permission",
+                description="I don't have the `Manage Messages` permission to clear messages in this channel.",
                 color=discord.Color.red()
             )
             await ctx.send(embed=embed, delete_after=5)
             return
+        # --- *** END OF FIX *** ---
         
         # Validate amount
         if amount < AdminConfig.MIN_CLEAR_MESSAGES or amount > AdminConfig.MAX_CLEAR_MESSAGES:
@@ -750,10 +752,11 @@ class Admin(commands.Cog):
             await ctx.message.delete()
             
             # Delete messages with safety limits
-            deleted = await ctx.channel.purge(limit=amount + 1)  # +1 to include command message
+            # We add 1 to amount because ctx.message.delete() is now separate
+            deleted = await ctx.channel.purge(limit=amount) 
             
             # Log the action
-            actual_deleted = len(deleted) - 1  # Exclude command message
+            actual_deleted = len(deleted)
             await self.log_mod_action("clear", ctx.author, None, f"Cleared {actual_deleted} messages in #{ctx.channel.name}")
             
             # Send confirmation
@@ -785,18 +788,20 @@ class Admin(commands.Cog):
     @commands.command(name="clearuser", aliases=["purgeuser"])
     async def clear_user(self, ctx: commands.Context, member: discord.Member, amount: int = 10):
         """Delete messages from a specific user with security checks."""
-        # Security validation for both clear and target member
-        can_moderate_clear, error_clear = await self.security_manager.can_moderate_member(ctx, ctx.guild.me, "clearuser")
-        can_moderate_member, error_member = await self.security_manager.can_moderate_member(ctx, member, "clearuser")
-        
-        if not can_moderate_clear:
+        # --- *** BUG FIX *** ---
+        # Replaced the faulty security check with a direct permission check
+        bot_permissions = ctx.channel.permissions_for(ctx.guild.me)
+        if not bot_permissions.manage_messages:
             embed = discord.Embed(
-                title="❌ Permission Denied",
-                description=error_clear,
+                title="❌ Bot Missing Permission",
+                description="I don't have the `Manage Messages` permission to clear messages in this channel.",
                 color=discord.Color.red()
             )
             await ctx.send(embed=embed, delete_after=5)
             return
+        
+        # Check if admin can moderate the target member
+        can_moderate_member, error_member = await self.security_manager.can_moderate_member(ctx, member, "clearuser")
         
         if not can_moderate_member:
             embed = discord.Embed(
@@ -806,6 +811,7 @@ class Admin(commands.Cog):
             )
             await ctx.send(embed=embed, delete_after=5)
             return
+        # --- *** END OF FIX *** ---
         
         # Validate amount
         if amount < AdminConfig.MIN_CLEAR_MESSAGES or amount > AdminConfig.MAX_CLEAR_MESSAGES:
