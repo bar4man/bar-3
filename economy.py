@@ -14,6 +14,7 @@ from constants import EconomyConfig
 import aiofiles  # <-- ADDED IMPORT
 import glob      # <-- ADDED IMPORT
 from error_handler import ErrorHandler # <-- ADDED IMPORT
+from admin import is_bot_admin # <-- IMPORTED ADMIN CHECK
 
 # ---------------- Backup Manager ----------------
 class BackupManager:
@@ -984,7 +985,9 @@ class Economy(commands.Cog):
         try:
             # Check cooldown
             remaining = await self.check_cooldown(ctx.author.id, "work", EconomyConfig.WORK_COOLDOWN)
-            if remaining:
+            # --- MODIFIED: Add admin bypass ---
+            if remaining and not is_bot_admin(ctx.author):
+            # --- END MODIFICATION ---
                 embed = await self.create_economy_embed("⏰ Already Worked Recently", discord.Color.orange())
                 embed.description = f"You can work again in **{self.format_time(remaining)}**"
                 return await ctx.send(embed=embed)
@@ -1050,7 +1053,9 @@ class Economy(commands.Cog):
         try:
             # Check cooldown
             remaining = await self.check_cooldown(ctx.author.id, "daily", EconomyConfig.DAILY_COOLDOWN)
-            if remaining:
+            # --- MODIFIED: Add admin bypass ---
+            if remaining and not is_bot_admin(ctx.author):
+            # --- END MODIFICATION ---
                 embed = await self.create_economy_embed("⏰ Daily Reward Claimed", discord.Color.orange())
                 embed.description = f"You can claim your next daily reward in **{self.format_time(remaining)}**."
                 return await ctx.send(embed=embed)
