@@ -852,7 +852,7 @@ class BartenderCog(commands.Cog):
                 return
             
             # Set cooldown
-            self.security_manager.set_drink_cooldown(ctx.author.id, "sober_up")
+            self.security_manager..set_drink_cooldown(ctx.author.id, "sober_up")
             
             # Order water
             await self.order_drink(ctx, "water")
