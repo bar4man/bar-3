@@ -35,16 +35,18 @@ class AdminSecurityManager:
     
     async def can_moderate_member(self, ctx: commands.Context, target: discord.Member, action: str) -> tuple[bool, str]:
         """Check if moderator can take action on target member."""
-        # Cannot moderate self
-        if target == ctx.author:
-            return False, "You cannot moderate yourself."
+        
+        # --- *** FIX: REMOVED SELF-MODERATION BLOCK *** ---
+        # The check "if target == ctx.author:" was removed to allow admins
+        # to use commands like ~economygive on themselves.
+        # --- *** END OF FIX *** ---
         
         # Cannot moderate the bot
         if target == ctx.guild.me:
             return False, "You cannot moderate the bot."
         
-        # Cannot moderate server owner
-        if target == ctx.guild.owner:
+        # Cannot moderate server owner (unless you are the owner)
+        if target == ctx.guild.owner and ctx.author != ctx.guild.owner:
             return False, "You cannot moderate the server owner."
         
         # Check if target is a bot (with exceptions)
@@ -82,7 +84,8 @@ class AdminSecurityManager:
             "mute": ["manage_roles"],
             "unmute": ["manage_roles"],
             "clear": ["manage_messages", "read_message_history"],
-            "clearuser": ["manage_messages", "read_message_history"]
+            "clearuser": ["manage_messages", "read_message_history"],
+            "economy_give": [] # No special perms needed, just admin check
         }
         return permissions_map.get(action, [])
     
@@ -896,13 +899,19 @@ class Admin(commands.Cog):
         """Admin: Give money to a user's wallet with security checks."""
         # Security validation
         can_moderate, error_message = await self.security_manager.can_moderate_member(ctx, member, "economy_give")
-        if not can_moderate:
+        
+        # --- *** FIX: This is the part that was failing *** ---
+        # We allow the error "You cannot moderate yourself" ONLY for this command.
+        if not can_moderate and error_message != "You cannot moderate yourself.":
+            # It failed for a *different* reason (e.g., role hierarchy)
             embed = discord.Embed(
                 title="❌ Permission Denied",
                 description=error_message,
                 color=discord.Color.red()
             )
             return await ctx.send(embed=embed)
+        # If the only error was "You cannot moderate yourself", we now ignore it and proceed.
+        
         
         # Validate amount
         if amount <= 0:
