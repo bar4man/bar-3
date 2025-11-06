@@ -5,9 +5,11 @@ import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
+from discord.ui import View, Button # <-- ADDED FOR BUTTONS
 from economy import db
-from constants import BartenderConfig  # <-- FIXED IMPORT
-from error_handler import ErrorHandler # <-- ADDED IMPORT
+from constants import BartenderConfig
+from error_handler import ErrorHandler
+from admin import is_bot_admin # <-- IMPORTED ADMIN CHECK
 
 # ---------------- Bartender Configuration Constants (REMOVED) ----------------
 # All constants are now in constants.py
@@ -21,8 +23,13 @@ class BartenderSecurityManager:
         self.gift_cooldowns = {}
         self.rapid_ordering = {}
     
-    async def check_drink_cooldown(self, user_id: int, drink_key: str) -> tuple[bool, float]:
+    async def check_drink_cooldown(self, user_id: int, drink_key: str, member: discord.Member = None) -> tuple[bool, float]:
         """Check if user can order a drink (cooldown and global cooldown)."""
+        # --- ADMIN BYPASS ---
+        if member and is_bot_admin(member):
+            return True, 0
+        # --- END BYPASS ---
+        
         now = datetime.now(timezone.utc).timestamp()
         
         # Global cooldown check
@@ -56,8 +63,13 @@ class BartenderSecurityManager:
         # Clean up old cooldowns periodically
         self._cleanup_old_cooldowns()
     
-    async def check_gift_cooldown(self, user_id: int) -> tuple[bool, float]:
+    async def check_gift_cooldown(self, user_id: int, member: discord.Member = None) -> tuple[bool, float]:
         """Check if user can gift a drink."""
+        # --- ADMIN BYPASS ---
+        if member and is_bot_admin(member):
+            return True, 0
+        # --- END BYPASS ---
+        
         now = datetime.now(timezone.utc).timestamp()
         key = f"{user_id}_gift"
         
@@ -541,7 +553,8 @@ class BartenderCog(commands.Cog):
             return
         
         # Security validation
-        can_order, cooldown_remaining = await self.security_manager.check_drink_cooldown(ctx.author.id, drink_key)
+        # --- MODIFIED: Pass member to check ---
+        can_order, cooldown_remaining = await self.security_manager.check_drink_cooldown(ctx.author.id, drink_key, ctx.author)
         if not can_order:
             embed = await self.create_bar_embed("⏰ Drink Cooldown", discord.Color.orange())
             embed.description = f"You've ordered this drink too recently. Please wait {int(cooldown_remaining)} seconds."
@@ -549,19 +562,21 @@ class BartenderCog(commands.Cog):
             return
         
         # Validate order security
-        is_valid_order, order_error = self.security_manager.validate_drink_order(ctx.author.id, drink_key)
-        if not is_valid_order:
-            embed = await self.create_bar_embed("❌ Order Limit", discord.Color.red())
-            embed.description = order_error
-            await ctx.send(embed=embed)
-            return
+        # --- MODIFIED: Bypass for admin ---
+        if not is_bot_admin(ctx.author):
+            is_valid_order, order_error = self.security_manager.validate_drink_order(ctx.author.id, drink_key)
+            if not is_valid_order:
+                embed = await self.create_bar_embed("❌ Order Limit", discord.Color.red())
+                embed.description = order_error
+                await ctx.send(embed=embed)
+                return
         
         drink = self.drinks[drink_key]
         user_data = await db.get_user(ctx.author.id)
         intoxication = await self.get_intoxication_level(ctx.author.id)
         
-        # Check intoxication limits
-        if intoxication >= BartenderConfig.FORCE_SOBER_LEVEL:
+        # Check intoxication limits (admin bypasses this)
+        if intoxication >= BartenderConfig.FORCE_SOBER_LEVEL and not is_bot_admin(ctx.author):
             embed = await self.create_bar_embed("🚫 Health Safety Lock", discord.Color.red())
             embed.description = (
                 "**HEALTH PROTECTION ACTIVATED!**\n\n"
@@ -586,9 +601,9 @@ class BartenderCog(commands.Cog):
             await ctx.send(embed=embed)
             return
         
-        # Warning for high intoxication
+        # Warning for high intoxication (admin bypasses this)
         warning_embed = None
-        if intoxication >= BartenderConfig.INTOXICATION_WARNING_LEVEL and drink["effects"]["intoxication"] > 0:
+        if intoxication >= BartenderConfig.INTOXICATION_WARNING_LEVEL and drink["effects"]["intoxication"] > 0 and not is_bot_admin(ctx.author):
             warning_embed = await self.create_bar_embed("🚫 Maybe Slow Down?", discord.Color.orange())
             warning_embed.description = (
                 f"You're already at intoxication level {intoxication}/10. "
@@ -844,7 +859,8 @@ class BartenderCog(commands.Cog):
         """Order water to help sober up with cooldown."""
         try:
             # Check cooldown for sober-up command
-            can_order, cooldown_remaining = await self.security_manager.check_drink_cooldown(ctx.author.id, "sober_up")
+            # --- MODIFIED: Pass member to check ---
+            can_order, cooldown_remaining = await self.security_manager.check_drink_cooldown(ctx.author.id, "sober_up", ctx.author)
             if not can_order:
                 embed = await self.create_bar_embed("⏰ Cooldown Active", discord.Color.orange())
                 embed.description = f"You can use sober-up again in {int(cooldown_remaining)} seconds."
@@ -852,7 +868,10 @@ class BartenderCog(commands.Cog):
                 return
             
             # Set cooldown
+            # --- *** TYPO FIX *** ---
+            # Was `self.security_manager..set_drink_cooldown`
             self.security_manager.set_drink_cooldown(ctx.author.id, "sober_up")
+            # --- *** END OF FIX *** ---
             
             # Order water
             await self.order_drink(ctx, "water")
@@ -887,7 +906,8 @@ class BartenderCog(commands.Cog):
                 return
             
             # Check gift cooldown
-            can_gift, cooldown_remaining = await self.security_manager.check_gift_cooldown(ctx.author.id)
+            # --- MODIFIED: Pass member to check ---
+            can_gift, cooldown_remaining = await self.security_manager.check_gift_cooldown(ctx.author.id, ctx.author)
             if not can_gift:
                 embed = await self.create_bar_embed("⏰ Gift Cooldown", discord.Color.orange())
                 embed.description = f"You're sending gifts too quickly! Please wait {int(cooldown_remaining)} seconds."
