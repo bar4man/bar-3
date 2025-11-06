@@ -2,37 +2,37 @@
 # This file centralizes all configuration constants for your cogs.
 
 class EconomyConfig:
-    # --- Economy (MODIFIED: Less Restrictive) ---
-    STARTING_MONEY = 100
-    DEFAULT_WALLET_LIMIT = 50000  # Was 10000
-    DEFAULT_BANK_LIMIT = 250000 # Was 50000
+    # --- Economy ---
+    STARTING_MONEY = 500  # Increased
+    DEFAULT_WALLET_LIMIT = 25000  # Increased
+    DEFAULT_BANK_LIMIT = 100000  # Increased
     
-    # --- Work (MODIFIED: More rewarding, less cooldown) ---
-    WORK_COOLDOWN = 1800  # 30 minutes (was 3600)
-    WORK_MIN_EARN = 150   # Was 50
-    WORK_MAX_EARN = 500   # Was 300
-    WORK_CRITICAL_CHANCE = 0.1  # 10%
+    # --- Work ---
+    WORK_COOLDOWN = 1800  # 30 minutes (Less restrictive)
+    WORK_MIN_EARN = 100  # Increased
+    WORK_MAX_EARN = 500  # Increased
+    WORK_CRITICAL_CHANCE = 0.15  # 15% (Increased)
     
-    # --- Daily (MODIFIED: More rewarding) ---
-    DAILY_REWARD = 1000         # Was 500
-    DAILY_COOLDOWN = 86400      # 24 hours
-    DAILY_STREAK_BONUS = 250    # Was 100
+    # --- Daily ---
+    DAILY_REWARD = 1000  # Increased
+    DAILY_COOLDOWN = 86400  # 24 hours
+    DAILY_STREAK_BONUS = 250  # Increased
 
 class BartenderConfig:
     # --- Cooldowns ---
-    DRINK_GLOBAL_COOLDOWN = 5  # 5 seconds
-    DRINK_COOLDOWN = 30         # 30 seconds for the *same* drink
-    GIFT_COOLDOWN = 10          # 10 seconds
+    DRINK_GLOBAL_COOLDOWN = 3  # 3 seconds (Less restrictive)
+    DRINK_COOLDOWN = 15         # 15 seconds for the *same* drink (Less restrictive)
+    GIFT_COOLDOWN = 5           # 5 seconds (Less restrictive)
     
     # --- Limits ---
-    MAX_DRINK_ORDER_AMOUNT = 5
+    MAX_DRINK_ORDER_AMOUNT = 10 # (Less restrictive)
     MAX_INTOXICATION = 10
-    FORCE_SOBER_LEVEL = 9
-    INTOXICATION_DANGER_LEVEL = 8
-    INTOXICATION_WARNING_LEVEL = 7
+    FORCE_SOBER_LEVEL = 10        # (Less restrictive)
+    INTOXICATION_DANGER_LEVEL = 9 # (Less restrictive)
+    INTOXICATION_WARNING_LEVEL = 8  # (Less restrictive)
     
     # --- Sobering ---
-    SOBERING_RATE = 1  # 1 point per 5 minutes
+    SOBERING_RATE = 2  # 2 points per 5 minutes (Faster)
     SOBERING_DRINKS = ["water"]
     
     # --- Other ---
@@ -40,28 +40,29 @@ class BartenderConfig:
 
 class GamblingConfig:
     # --- Coinflip ---
-    COINFLIP_WIN_CHANCE = 0.55  # 55%
-    COINFLIP_PAYOUT = 1.8
+    COINFLIP_WIN_CHANCE = 0.60  # 60% (More rewarding)
+    COINFLIP_PAYOUT = 1.9       # (More rewarding)
     
     # --- Dice ---
-    DICE_WIN_NUMBERS = [4, 5, 6]
+    DICE_WIN_NUMBERS = [3, 4, 5, 6] # (Better odds)
     DICE_PAYOUTS = {
-        4: 1.5,
-        5: 2.0,
-        6: 5.0
+        3: 1.2,  # (New payout)
+        4: 1.8,  # (More rewarding)
+        5: 2.5,  # (More rewarding)
+        6: 6.0   # (More rewarding)
     }
     
     # --- Slots ---
     SLOT_SYMBOLS = ["🍒", "🍋", "🍊", "💎", "7️⃣"]
     SLOT_WEIGHTS = [30, 25, 20, 15, 10]  # Weights for symbols
     SLOT_PAYOUTS = {
-        "three_7️⃣": 30.0,
-        "three_💎": 20.0,
-        "three_🍒": 10.0,
+        "three_7️⃣": 50.0,  # (More rewarding)
+        "three_💎": 30.0,  # (More rewarding)
+        "three_🍒": 15.0,  # (More rewarding)
         "three_🍊": 5.0,
         "three_🍋": 3.0,
-        "two_matching": 1.2
+        "two_matching": 1.5 # (More rewarding)
     }
     
     # --- RPS ---
-    RPS_PAYOUT = 2.0
+    RPS_PAYOUT = 2.2 # (More rewarding)
