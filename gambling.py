@@ -80,11 +80,10 @@ class GamblingCog(commands.Cog):
         if user_data["wallet"] < bet:
             return False, f"You don't have enough money in your wallet. You have {self.format_money(user_data['wallet'])} but tried to bet {self.format_money(bet)}."
         
-        # --- MODIFIED: Less restrictive bet limit ---
-        max_bet = min(250000, user_data["wallet_limit"] // 4) # Was min(100000, ... // 10)
+        # Maximum bet limit for security
+        max_bet = min(100000, user_data["wallet_limit"] // 10)
         if bet > max_bet:
-            return False, f"Maximum bet allowed is {self.format_money(max_bet)} (25% of wallet limit or 250,000£)."
-        # --- END MODIFICATION ---
+            return False, f"Maximum bet allowed is {self.format_money(max_bet)} for security reasons."
         
         return True, "OK"
 
@@ -92,16 +91,16 @@ class GamblingCog(commands.Cog):
     
     @commands.command(name="flip", aliases=["coinflip", "coin"])
     async def coin_flip(self, ctx: commands.Context, choice: str = None, bet: int = None):
-        """Flip a coin with improved 55% win chance and 1.8x payout."""
+        """Flip a coin with improved 60% win chance and 1.9x payout."""
         try:
             if not choice or not bet:
                 embed = await self.create_gambling_embed("🎲 Coin Flip Game", discord.Color.blue())
                 embed.description = (
-                    "Flip a coin with improved 55% win chance!\n\n"
+                    "Flip a coin with improved 60% win chance!\n\n"
                     "**Usage:** `~flip <heads/tails> <bet>`\n"
                     "**Example:** `~flip heads 100`\n\n"
-                    "**Payout:** 1.8x your bet\n"
-                    "**Win Chance:** 55%\n"
+                    f"**Payout:** {GamblingConfig.COINFLIP_PAYOUT}x your bet\n"
+                    f"**Win Chance:** {GamblingConfig.COINFLIP_WIN_CHANCE * 100:.0f}%\n"
                     "**Cooldown:** 3 seconds"
                 )
                 await ctx.send(embed=embed)
@@ -136,13 +135,13 @@ class GamblingCog(commands.Cog):
             # Remove bet from wallet
             result = await db.update_balance(ctx.author.id, wallet_change=-bet)
             
-            # Determine outcome with improved odds
-            win = random.random() < GamblingConfig.COINFLIP_WIN_CHANCE  # 55% chance to win
-            coin_result = random.choice(["heads", "tails"])
+            # --- *** LOGIC FIX *** ---
+            # Determine outcome with true 60% win chance
+            win = random.random() < GamblingConfig.COINFLIP_WIN_CHANCE  # 60% chance to win
             
-            # Check if user won
-            if win and choice == coin_result:
+            if win:
                 # User wins!
+                coin_result = choice # The coin lands on what they chose
                 winnings = int(bet * GamblingConfig.COINFLIP_PAYOUT)
                 result = await db.update_balance(ctx.author.id, wallet_change=winnings)
                 
@@ -154,12 +153,14 @@ class GamblingCog(commands.Cog):
                 
             else:
                 # User loses
+                coin_result = "tails" if choice == "heads" else "heads" # Coin lands on the opposite
                 embed = await self.create_gambling_embed("💸 You Lost", discord.Color.red())
                 embed.description = f"The coin landed on **{coin_result}**. Better luck next time!"
                 embed.add_field(name="📉 Loss", value=self.format_money(bet), inline=True)
                 embed.add_field(name="💵 New Balance", value=self.format_money(result["wallet"]), inline=True)
                 embed.add_field(name="🎯 Choice", value=choice.title(), inline=True)
-            
+            # --- *** END OF FIX *** ---
+
             # Set cooldown
             self.security_manager.set_cooldown(ctx.author.id, "flip", 3)
             
@@ -175,14 +176,15 @@ class GamblingCog(commands.Cog):
             if not bet:
                 embed = await self.create_gambling_embed("🎯 Dice Game", discord.Color.blue())
                 embed.description = (
-                    "Roll a dice! Win on 4, 5, or 6 with different payouts!\n\n"
+                    "Roll a dice! Win on 3, 4, 5, or 6 with different payouts!\n\n"
                     "**Usage:** `~dice <bet>`\n"
                     "**Example:** `~dice 100`\n\n"
                     "**Winning Numbers & Payouts:**\n"
-                    "• **6**: 5x your bet\n"
-                    "• **5**: 2x your bet\n"
-                    "• **4**: 1.5x your bet\n"
-                    "• **1-3**: Lose your bet\n"
+                    f"• **6**: {GamblingConfig.DICE_PAYOUTS[6]}x your bet\n"
+                    f"• **5**: {GamblingConfig.DICE_PAYOUTS[5]}x your bet\n"
+                    f"• **4**: {GamblingConfig.DICE_PAYOUTS[4]}x your bet\n"
+                    f"• **3**: {GamblingConfig.DICE_PAYOUTS[3]}x your bet\n"
+                    "• **1-2**: Lose your bet\n"
                     "**Cooldown:** 4 seconds"
                 )
                 await ctx.send(embed=embed)
@@ -253,12 +255,12 @@ class GamblingCog(commands.Cog):
                     "**Usage:** `~slots <bet>`\n"
                     "**Example:** `~slots 100`\n\n"
                     "**Payouts:**\n"
-                    "• **Three 7️⃣**: 30x\n"
-                    "• **Three 💎**: 20x\n"
-                    "• **Three 🍒**: 10x\n"
+                    f"• **Three 7️⃣**: {GamblingConfig.SLOT_PAYOUTS['three_7️⃣']}x\n"
+                    f"• **Three 💎**: {GamblingConfig.SLOT_PAYOUTS['three_💎']}x\n"
+                    f"• **Three 🍒**: {GamblingConfig.SLOT_PAYOUTS['three_🍒']}x\n"
                     "• **Three 🍊**: 5x\n"
                     "• **Three 🍋**: 3x\n"
-                    "• **Two Matching**: 1.2x\n"
+                    f"• **Two Matching**: {GamblingConfig.SLOT_PAYOUTS['two_matching']}x\n"
                     "**Cooldown:** 5 seconds"
                 )
                 await ctx.send(embed=embed)
@@ -318,7 +320,7 @@ class GamblingCog(commands.Cog):
                 embed.description = f"**{slot_display}**\n\nTwo matching! You won {self.format_money(winnings)}!"
                 embed.add_field(name="💰 Winnings", value=self.format_money(winnings), inline=True)
                 embed.add_field(name="💵 New Balance", value=self.format_money(result["wallet"]), inline=True)
-                embed.add_field(name="🎯 Multiplier", value="1.2x", inline=True)
+                embed.add_field(name="🎯 Multiplier", value=f"{GamblingConfig.SLOT_PAYOUTS['two_matching']}x", inline=True)
                 
             else:
                 # No win
@@ -346,7 +348,7 @@ class GamblingCog(commands.Cog):
                     "**Usage:** `~rps <rock/paper/scissors> <bet>`\n"
                     "**Example:** `~rps rock 100`\n\n"
                     "**Rules:**\n"
-                    "• **Win**: 2x your bet\n"
+                    f"• **Win**: {GamblingConfig.RPS_PAYOUT}x your bet\n"
                     "• **Tie**: Return your bet\n"
                     "• **Lose**: Lose your bet\n"
                     "**Cooldown:** 3 seconds"
@@ -407,7 +409,7 @@ class GamblingCog(commands.Cog):
                 embed.description = f"**You:** {choice.title()} | **Bot:** {bot_choice.title()}\n\nYou won {self.format_money(winnings)}!"
                 embed.add_field(name="💰 Winnings", value=self.format_money(winnings), inline=True)
                 embed.add_field(name="💵 New Balance", value=self.format_money(result["wallet"]), inline=True)
-                embed.add_field(name="🎯 Multiplier", value="2x", inline=True)
+                embed.add_field(name="🎯 Multiplier", value=f"{GamblingConfig.RPS_PAYOUT}x", inline=True)
                 
             else:
                 # User loses
@@ -443,7 +445,7 @@ class GamblingCog(commands.Cog):
             
             if success:
                 # Successful beg
-                amount = random.randint(10, 70)
+                amount = random.randint(50, 150) # Increased reward
                 result = await db.update_balance(ctx.author.id, wallet_change=amount)
                 
                 beg_responses = [
