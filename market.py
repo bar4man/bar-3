@@ -8,6 +8,7 @@ from typing import Dict, List, Optional
 import math
 from economy import db
 from error_handler import ErrorHandler # <-- ADDED IMPORT
+from admin import is_bot_admin # <-- IMPORTED ADMIN CHECK
 
 # ---------------- Market Configuration ----------------
 class MarketConfig:
@@ -33,8 +34,13 @@ class MarketSecurityManager:
         self.trade_limits = {}
         self.suspicious_activity = {}
     
-    async def check_trade_limit(self, user_id: int, asset_type: str, amount: float) -> tuple[bool, str]:
+    async def check_trade_limit(self, user_id: int, asset_type: str, amount: float, member: discord.Member = None) -> tuple[bool, str]:
         """Check if user is within trade limits."""
+        # --- ADMIN BYPASS ---
+        if member and is_bot_admin(member):
+            return True, "OK"
+        # --- END BYPASS ---
+        
         now = datetime.now(timezone.utc).timestamp()
         key = f"{user_id}_{asset_type}"
         
@@ -75,8 +81,13 @@ class MarketSecurityManager:
         
         return True, "OK"
     
-    async def check_news_cooldown(self, command: str) -> tuple[bool, float]:
+    async def check_news_cooldown(self, command: str, member: discord.Member = None) -> tuple[bool, float]:
         """Check if news generation is on cooldown."""
+        # --- ADMIN BYPASS ---
+        if member and is_bot_admin(member):
+            return True, 0
+        # --- END BYPASS ---
+        
         now = datetime.now(timezone.utc).timestamp()
         
         if command in self.news_cooldowns:
@@ -464,13 +475,6 @@ class MarketCog(commands.Cog):
         self.announcement_channel_id = None
         logging.info("✅ Market system initialized with security features")
     
-    # --- *** FIX *** ---
-    # Added the missing helper function
-    def format_money(self, amount: int) -> str:
-        """Format money with commas and currency symbol."""
-        return f"{amount:,}£"
-    # --- *** END OF FIX *** ---
-    
     def cog_unload(self):
         """Cleanup tasks when cog is unloaded."""
         self.price_update_task.cancel()
@@ -757,7 +761,9 @@ class MarketCog(commands.Cog):
         try:
             asset_type = asset_type.lower()
             
-            if not self.market.market_open and asset_type == "stock":
+            # --- MODIFIED: Add admin bypass for market hours ---
+            if not self.market.market_open and asset_type == "stock" and not is_bot_admin(ctx.author):
+            # --- END MODIFICATION ---
                 # Using a custom error message instead of the full handler for a cleaner response
                 embed = discord.Embed(title="🏛️ Market Closed", description="The stock market is currently closed. Trading hours are 9:00 - 17:00 UTC.", color=discord.Color.red())
                 await ctx.send(embed=embed)
@@ -834,7 +840,9 @@ class MarketCog(commands.Cog):
         try:
             asset_type = asset_type.lower()
             
-            if not self.market.market_open and asset_type == "stock":
+            # --- MODIFIED: Add admin bypass for market hours ---
+            if not self.market.market_open and asset_type == "stock" and not is_bot_admin(ctx.author):
+            # --- END MODIFICATION ---
                 embed = discord.Embed(title="🏛️ Market Closed", description="The stock market is currently closed. Trading hours are 9:00 - 17:00 UTC.", color=discord.Color.red())
                 await ctx.send(embed=embed)
                 return
