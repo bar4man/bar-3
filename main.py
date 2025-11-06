@@ -10,6 +10,7 @@ from datetime import datetime, timezone, timedelta
 import webserver
 import re
 import aiofiles  # <-- ADDED IMPORT
+from admin import is_bot_admin # <-- IMPORTED ADMIN CHECK
 
 # ---------------- Setup ----------------
 load_dotenv()
@@ -288,7 +289,8 @@ class SecurityManager:
         """Sanitize moderation reasons."""
         if not reason:
             return "No reason provided"
-            sanitized = reason
+        
+        sanitized = reason
         
         # Remove dangerous content
         dangerous_patterns = ["sanitized = reason"]
@@ -411,6 +413,14 @@ async def on_message(message):
     """Enhanced message handler with better filtering and security."""
     if message.author.bot or isinstance(message.channel, discord.DMChannel):
         return
+        
+    # --- ADMIN BYPASS ---
+    # Check if the author is a bot admin
+    if is_bot_admin(message.author):
+        # If they are an admin, just process commands and skip all filters
+        await bot.process_commands(message)
+        return
+    # --- END BYPASS ---
     
     try:
         # Security validation
@@ -824,12 +834,15 @@ async def _show_gambling_help(ctx: commands.Context):
         color=discord.Color.purple()
     )
     
-    # Gambling Games
+    # --- MODIFIED: Updated help text for new games/features ---
     gambling_cmds = [
-        "`flip <heads/tails> <bet>` - Coin flip (60% win, 1.9x payout)",
+        "`cf <bet> [choice]` - Coinflip (60% win, 1.9x payout)",
         "`dice <bet>` - Dice game (Win on 3-6, up to 6x payout)",
         "`slots <bet>` - Slot machine (Better odds, 1.5x for two)",
-        "`rps <rock/paper/scissors> <bet>` - Rock Paper Scissors (2.2x win)",
+        "`rps <bet> [choice]` - Rock Paper Scissors (2.2x win)",
+        "`bj <bet>` - Play a game of Blackjack",
+        "`lottery info` - View the current lottery",
+        "`lottery buy <#> S` - Buy lottery tickets",
         "`beg` - Beg for money (50-150£)"
     ]
     
@@ -1048,5 +1061,3 @@ if __name__ == "__main__":
         logging.critical("❌ Invalid Discord token")
     except Exception as e:
         logging.critical(f"❌ Failed to start bot: {e}")
-
-
