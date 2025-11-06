@@ -133,6 +133,31 @@ class AdminSecurityManager:
         
         logging.warning(f"🚨 Suspicious admin action: {log_entry}")
 
+# ---------------- NEW PERMISSION UTILITY ----------------
+def is_bot_admin(member: discord.Member) -> bool:
+    """
+    Check if a member has bot admin permissions.
+    (Server Admin, Server Owner, or 'bot-admin' role)
+    """
+    if not isinstance(member, discord.Member):
+        return False
+        
+    # Server administrators always have access
+    if member.guild_permissions.administrator:
+        return True
+    
+    # Server owner always have access
+    if member == member.guild.owner:
+        return True
+        
+    # Check for bot-admin role
+    bot_admin_role = discord.utils.get(member.roles, name=AdminConfig.ADMIN_ROLE_NAME)
+    if bot_admin_role:
+        return True
+    
+    return False
+
+# ---------------- Admin Cog ----------------
 class Admin(commands.Cog):
     """Enhanced administrative commands for bot management and moderation."""
     
@@ -160,20 +185,10 @@ class Admin(commands.Cog):
     # -------------------- Enhanced Permission System --------------------
     def is_admin(self, member: discord.Member) -> bool:
         """Check if member has admin permissions with enhanced security."""
-        # Server administrators always have access
-        if member.guild_permissions.administrator:
-            return True
-        
-        # Check for bot-admin role
-        bot_admin_role = discord.utils.get(member.roles, name=AdminConfig.ADMIN_ROLE_NAME)
-        if bot_admin_role:
-            return True
-        
-        # Server owner always has access
-        if member == member.guild.owner:
-            return True
-        
-        return False
+        # --- *** MODIFIED *** ---
+        # Use the new global utility function
+        return is_bot_admin(member)
+        # --- *** END OF MODIFICATION *** ---
     
     def is_moderator(self, member: discord.Member) -> bool:
         """Check if member has moderator permissions."""
