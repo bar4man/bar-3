@@ -12,3 +12,5 @@ services:
         sync: false
       - key: KEEP_ALIVE
         value: "true"
+      - key: PORT
+        value: "8080"
