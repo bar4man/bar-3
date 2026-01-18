@@ -11,10 +11,10 @@ from typing import Optional, Dict, List, Tuple
 import math
 import json
 from constants import EconomyConfig
-import aiofiles  # <-- ADDED IMPORT
-import glob      # <-- ADDED IMPORT
-from error_handler import ErrorHandler # <-- ADDED IMPORT
-from admin import is_bot_admin # <-- IMPORTED ADMIN CHECK
+import aiofiles
+import glob
+from error_handler import ErrorHandler
+from admin import is_bot_admin
 
 # ---------------- Backup Manager ----------------
 class BackupManager:
@@ -31,12 +31,12 @@ class BackupManager:
         try:
             # Use aiofiles for async write
             async with aiofiles.open(filename, 'w') as f:
-                await f.write(json.dumps(data, f, indent=2, default=str))
+                await f.write(json.dumps(data, indent=2, default=str))
             
             # Clean up old backups
             await self._cleanup_old_backups(backup_type)
             
-            logging.info(f"✅ Backup created: {filename}")
+            logging.info(f"Backup created: {filename}")
             return True
         except Exception as e:
             logging.error(f"❌ Backup failed: {e}")
@@ -102,7 +102,7 @@ class MongoDB:
             # Test connection
             await self.client.admin.command('ping')
             self.connected = True
-            logging.info("✅ Connected to MongoDB Atlas successfully")
+            logging.info("Connected to MongoDB Atlas")
             return True
             
         except Exception as e:
@@ -196,12 +196,12 @@ class MongoDB:
                     "created_at": datetime.now()
                 }
                 await self.db.shop.insert_one(default_shop)
-                logging.info("✅ Default shop items created")
+                logging.info("Default shop items created")
             
             # Migrate existing users to new schema
             await self.migrate_user_schema()
             
-            logging.info("✅ MongoDB collections initialized")
+            logging.info("MongoDB collections initialized")
             return True
             
         except Exception as e:
@@ -249,7 +249,7 @@ class MongoDB:
                         {"$set": update_data}
                     )
             
-            logging.info("✅ User schema migration completed")
+            logging.info("User schema migration completed")
                 
         except Exception as e:
             logging.error(f"❌ Error during user schema migration: {e}")
@@ -726,7 +726,7 @@ class Economy(commands.Cog):
         self.active_effects = {}  # Track active item effects
         self.backup_manager = BackupManager()
         self._transaction_log = []
-        logging.info("✅ Economy system initialized with atomic operations")
+        logging.info("Economy system initialized")
     
     async def cog_load(self):
         """Load data when cog is loaded."""
@@ -737,7 +737,7 @@ class Economy(commands.Cog):
             if success:
                 await db.initialize_collections()
                 self.ready = True
-                logging.info("✅ Economy system loaded with MongoDB")
+                logging.info("Economy system loaded with MongoDB")
                 return
             else:
                 logging.warning(f"❌ MongoDB connection attempt {attempt + 1} failed, retrying...")
