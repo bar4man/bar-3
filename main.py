@@ -9,8 +9,8 @@ import json
 from datetime import datetime, timezone, timedelta
 import webserver
 import re
-import aiofiles  # <-- ADDED IMPORT
-from admin import is_bot_admin # <-- IMPORTED ADMIN CHECK
+import aiofiles
+from admin import is_bot_admin
 
 # ---------------- Setup ----------------
 load_dotenv()
@@ -18,27 +18,14 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 KEEP_ALIVE = os.getenv("KEEP_ALIVE", "true").lower() == "true"
 
 # Enhanced logging setup
-def setup_logging():
-    """Setup comprehensive logging with both file and console output."""
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    
-    # File handler
-    file_handler = logging.FileHandler(filename="discord.log", encoding="utf-8", mode="a")
-    file_handler.setFormatter(logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    ))
-    
-    # Console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(logging.Formatter(
-        '%(levelname)s - %(name)s - %(message)s'
-    ))
-    
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-
-setup_logging()
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("discord.log", encoding="utf-8", mode="a"),
+        logging.StreamHandler()
+    ]
+)
 
 # Discord intents with validation
 intents = discord.Intents.default()
@@ -66,21 +53,18 @@ class ConfigManager:
             "allowed_channels": [],
             "mod_log_channel": None
         }
-        # Create config file synchronously (runs before event loop)
         self._ensure_config_exists()
     
     def _ensure_config_exists(self):
-        """Sync config file creation."""
-        try:
-            if not os.path.exists(self.filename):
+        if not os.path.exists(self.filename):
+            try:
                 with open(self.filename, "w") as f:
                     json.dump(self.default_config, f, indent=2, ensure_ascii=False)
-                logging.info(f"Created new config file: {self.filename}")
-        except Exception as e:
-            logging.error(f"Config creation error: {e}")
+                logging.info(f"Created config: {self.filename}")
+            except Exception as e:
+                logging.error(f"Config creation error: {e}")
     
     async def load(self):
-        """Load configuration from file asynchronously."""
         try:
             async with aiofiles.open(self.filename, "r") as f:
                 content = await f.read()
@@ -91,12 +75,11 @@ class ConfigManager:
             return self.default_config.copy()
     
     async def save(self, data):
-        """Save configuration to file asynchronously."""
         try:
             validated_data = {**self.default_config, **data}
             async with aiofiles.open(self.filename, "w") as f:
-                await f.write(json.dumps(validated_data, indent=2, ensure_ascii=False)) # Fixed: removed extra 'f'
-            logging.info("Config saved successfully")
+                await f.write(json.dumps(validated_data, indent=2, ensure_ascii=False))
+            logging.info("Config saved")
             return True
         except Exception as e:
             logging.error(f"Config save error: {e}")
@@ -111,19 +94,16 @@ class MessageFilter:
         self._cleanup_interval = SecurityConfig.CLEANUP_INTERVAL
         self._max_tracker_size = SecurityConfig.MAX_TRACKED_USERS
         self._cleanup_task = None
-        logging.info("✅ Message filter initialized with memory leak protection")
+        logging.info("Message filter initialized")
     
     async def start_cleanup_task(self):
-        """Start cleanup task when bot is ready."""
         self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
     
     def stop_cleanup_task(self):
-        """Stop cleanup task when bot shuts down."""
         if self._cleanup_task:
             self._cleanup_task.cancel()
     
     async def _periodic_cleanup(self):
-        """Periodic cleanup task to prevent memory leaks."""
         while True:
             try:
                 await asyncio.sleep(self._cleanup_interval)
@@ -131,25 +111,21 @@ class MessageFilter:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logging.error(f"Periodic cleanup error: {e}")
+                logging.error(f"Cleanup error: {e}")
     
     def is_spam(self, user_id):
-        """Check if user is spamming with automatic cleanup."""
         now = datetime.now(timezone.utc).timestamp()
         
-        # Cleanup old entries more frequently
         if now - self._last_cleanup > self._cleanup_interval:
             self._cleanup_old_entries()
             self._last_cleanup = now
         
-        # Limit tracker size
         if len(self.spam_tracker) > self._max_tracker_size:
             self._evict_oldest_entries()
         
         user_id_str = str(user_id)
         self.spam_tracker.setdefault(user_id_str, [])
         
-        # Remove old entries for this user
         self.spam_tracker[user_id_str] = [
             t for t in self.spam_tracker[user_id_str] 
             if now - t < self.SPAM_TIMEFRAME
@@ -159,53 +135,33 @@ class MessageFilter:
         return len(self.spam_tracker[user_id_str]) > self.SPAM_LIMIT
     
     def _cleanup_old_entries(self):
-        """Clean up old spam tracker entries."""
         now = datetime.now(timezone.utc).timestamp()
-        cutoff = now - 300  # 5 minutes
+        cutoff = now - 300
         
         users_to_remove = []
         for user_id, timestamps in self.spam_tracker.items():
-            # Filter old timestamps
             self.spam_tracker[user_id] = [t for t in timestamps if t > cutoff]
-            # Mark for removal if no recent activity
             if not self.spam_tracker[user_id]:
                 users_to_remove.append(user_id)
         
-        # Remove users with no recent activity
         for user_id in users_to_remove:
-            if user_id in self.spam_tracker: # Check if exists before deleting
-                del self.spam_tracker[user_id]
+            del self.spam_tracker[user_id]
         
         if users_to_remove:
-            logging.debug(f"🧹 Cleaned up {len(users_to_remove)} inactive users from spam tracker")
+            logging.debug(f"🧹 Cleaned up {len(users_to_remove)} users")
     
     def _evict_oldest_entries(self):
-        """Remove oldest entries when tracker gets too large."""
         if len(self.spam_tracker) <= self._max_tracker_size:
             return
         
-        # Remove 10% of oldest entries
         entries_to_remove = max(1, len(self.spam_tracker) // 10)
-        
-        # Find users with oldest last activity
-        user_last_activity = {}
-        for user_id, timestamps in self.spam_tracker.items():
-            if timestamps:
-                user_last_activity[user_id] = max(timestamps)
-            else:
-                user_last_activity[user_id] = 0
-        
-        # Sort by last activity (oldest first)
+        user_last_activity = {uid: max(ts) if ts else 0 for uid, ts in self.spam_tracker.items()}
         sorted_users = sorted(user_last_activity.items(), key=lambda x: x[1])
         
-        # Remove oldest entries
-        removed_count = 0
         for user_id, _ in sorted_users[:entries_to_remove]:
-            if user_id in self.spam_tracker:
-                del self.spam_tracker[user_id]
-                removed_count += 1
+            del self.spam_tracker[user_id]
         
-        logging.info(f"🧹 Evicted {removed_count} oldest entries from spam tracker")
+        logging.info(f"Evicted {entries_to_remove} oldest entries")
     
     def _load_filter_data(self):
         """Load filter data from file with caching."""
@@ -239,70 +195,33 @@ class SecurityManager:
     def __init__(self):
         self.suspicious_patterns = [
             r"\b(admin|root|system)\b.*\b(password|passwd|pwd)\b",
-            r"eval\s*\(",
-            r"exec\s*\(",
-            r"__import__",
-            r"subprocess",
-            r"os\.system",
-            r"curl\s+",
-            r"wget\s+",
-            r"bash\s+",
-            r"sh\s+",
-            r"cmd\s+",
-            r"powershell\s+",
-            r"<script.*?>", # <-- ADDED from security.py
-            r"javascript:",  # <-- ADDED from security.py
-            r"onload\s*=",    # <-- ADDED from security.py
-            r"onerror\s*=",    # <-- ADDED from security.py
+            r"eval\s*\(|exec\s*\(|__import__|subprocess|os\.system",
+            r"curl\s+|wget\s+|bash\s+|sh\s+|cmd\s+|powershell\s+",
+            r"<script.*?>|javascript:|onload\s*=|onerror\s*=",
         ]
     
     def validate_input(self, input_str: str, max_length: int = 1000) -> bool:
-        """Validate user input for potential security issues."""
         if not input_str or len(input_str) > max_length:
             return False
-        
-        # Check for suspicious patterns
         for pattern in self.suspicious_patterns:
             if re.search(pattern, input_str, re.IGNORECASE):
-                logging.warning(f"🚨 Suspicious input detected: {input_str[:100]}...")
+                logging.warning(f"🚨 Suspicious input: {input_str[:100]}...")
                 return False
-        
         return True
     
     def sanitize_username(self, username: str) -> str:
-        """Sanitize username for safe display."""
-        # Remove or escape potentially dangerous characters
-        sanitized = re.sub(r'[<>"\'&]', '', username)
-        return sanitized[:32]  # Limit length
-
-    # --- FUNCTIONS MERGED FROM security.py ---
+        return re.sub(r'[<>"\'&]', '', username)[:32]
     
-    def validate_amount(self, amount: int, max_amount: int = 10_000_000) -> bool:
-        """Validate monetary amounts for security."""
+    def validate_amount(self, amount, max_amount=10_000_000):
         try:
-            amount_int = int(amount)
-            return 0 < amount_int <= max_amount
+            return 0 < int(amount) <= max_amount
         except (ValueError, TypeError):
             return False
     
     def sanitize_reason(self, reason: str, max_length: int = 500) -> str:
-        """Sanitize moderation reasons."""
         if not reason:
             return "No reason provided"
-        
-        sanitized = reason
-        
-        # Remove dangerous content
-        dangerous_patterns = ["sanitized = reason"]
-        
-        for pattern in dangerous_patterns:
-            sanitized = sanitized.replace(pattern, "")
-        
-        # Limit length
-        if len(sanitized) > max_length:
-            sanitized = sanitized[:max_length-3] + "..."
-        
-        return sanitized.strip()
+        return reason.replace("sanitized = reason", "")[:max_length-3] + "..." if len(reason) > max_length else reason
 
 # ---------------- Create Manager Instances ----------------
 config_manager = ConfigManager()
@@ -327,7 +246,7 @@ class Bot(commands.Bot):
     
     async def on_ready(self):
         """Enhanced on_ready with more detailed startup info."""
-        logging.info(f"✅ Bot is ready as {self.user} (ID: {self.user.id})")
+        logging.info(f"Bot ready: {self.user} ({self.user.id})")
         logging.info(f"📊 Connected to {len(self.guilds)} guild(s)")
         
         # Start cleanup task now that event loop is running
@@ -354,7 +273,7 @@ bot = Bot()
 try:
     import webserver
     webserver.set_bot(bot)
-    logging.info("✅ Bot registered with web server for status monitoring")
+    logging.info("Bot registered with web server")
 except Exception as e:
     logging.warning(f"❌ Could not register bot with web server: {e}")
 
@@ -944,7 +863,7 @@ async def load_cogs():
     for cog in cogs:
         try:
             await bot.load_extension(cog)
-            logging.info(f"✅ Loaded cog: {cog}")
+            logging.info(f"Loaded cog: {cog}")
             loaded_count += 1
             
         except commands.ExtensionNotFound:
@@ -990,7 +909,7 @@ async def setup_hook():
     await load_cogs()
     auto_cleaner.start()
     
-    logging.info("✅ Setup hook completed")
+    logging.info("Setup hook completed")
 
 # --- BUG FIX: Removed redundant on_ready event ---
 # The on_ready logic is already handled inside the Bot class
@@ -1044,7 +963,7 @@ if KEEP_ALIVE:
         import webserver
         success = webserver.keep_alive()
         if success:
-            logging.info("✅ Keep-alive web server initialized")
+            logging.info("Keep-alive web server initialized")
         else:
             logging.warning("❌ Keep-alive web server failed to start")
     except Exception as e:
@@ -1052,6 +971,10 @@ if KEEP_ALIVE:
 
 # ---------------- Run Bot ----------------
 if __name__ == "__main__":
+    if not TOKEN:
+        logging.critical("❌ DISCORD_TOKEN environment variable not set")
+        exit(1)
+        
     try:
         logging.info("🚀 Starting bot...")
         bot.run(TOKEN)
