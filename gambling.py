@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-from discord.ui import View, Button, button # <-- ADDED FOR BUTTONS
+from discord.ui import View, Button, button
 import random
 import asyncio
 import logging
@@ -9,7 +9,7 @@ from typing import Dict, List, Optional
 from economy import db
 from constants import GamblingConfig
 from error_handler import ErrorHandler
-from admin import is_bot_admin # <-- IMPORTED ADMIN CHECK
+from admin import is_bot_admin
 
 class GamblingSecurityManager:
     """Security manager for gambling system to prevent exploits."""
@@ -252,7 +252,7 @@ class GamblingCog(commands.Cog, name="Gambling"):
         self.lottery_pot = 0
         self.lottery_ticket_price = 100 # Price per ticket
         self.lottery_entries = {} # {user_id: num_tickets}
-        logging.info("✅ Gambling system initialized with security features")
+        logging.info("Gambling system initialized")
     
     def format_money(self, amount: int) -> str:
         """Format money using main bot's system."""
