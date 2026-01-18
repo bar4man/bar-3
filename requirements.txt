@@ -1,7 +1,8 @@
 discord.py
-Flask
+motor
+dnspython
+flask
+waitress
 python-dotenv
 aiofiles
-motor
-pymongo
-waitress
+PyNaCl
