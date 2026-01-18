@@ -7,23 +7,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 import math
 from economy import db
-from error_handler import ErrorHandler # <-- ADDED IMPORT
-from admin import is_bot_admin # <-- IMPORTED ADMIN CHECK
-
-# ---------------- Market Configuration ----------------
-class MarketConfig:
-    TRADING_HOURS = {"open": 9, "close": 17}  # 9 AM - 5 PM UTC
-    BASE_VOLATILITY = 0.02
-    MAX_VOLATILITY = 0.05
-    NEWS_COOLDOWN = 180  # 3 minutes (Less restrictive)
-    MAX_STOCK_ORDER = 50000  # (Less restrictive)
-    MAX_GOLD_ORDER = 5000    # (Less restrictive)
-    MAX_PORTFOLIO_SIZE = 20  # (Less restrictive)
-    NEWS_IMPACT_MULTIPLIER = 0.75 # (More impactful)
-    MIN_GOLD_PRICE = 1500
-    MAX_GOLD_PRICE = 2500
-    STOCK_MIN_RATIO = 0.5
-    STOCK_MAX_RATIO = 3.0
+from constants import MarketConfig
+from error_handler import ErrorHandler
+from admin import is_bot_admin
 
 # ---------------- Market Security Manager ----------------
 class MarketSecurityManager:
@@ -473,7 +459,7 @@ class MarketCog(commands.Cog):
         self.market_hours_task = self.manage_market_hours.start()
         self.news_announcement_task = self.announce_market_news.start()
         self.announcement_channel_id = None
-        logging.info("✅ Market system initialized with security features")
+        logging.info("Market system initialized")
     
     def cog_unload(self):
         """Cleanup tasks when cog is unloaded."""
@@ -761,11 +747,8 @@ class MarketCog(commands.Cog):
         try:
             asset_type = asset_type.lower()
             
-            # --- MODIFIED: Add admin bypass for market hours ---
             if not self.market.market_open and asset_type == "stock" and not is_bot_admin(ctx.author):
-            # --- END MODIFICATION ---
-                # Using a custom error message instead of the full handler for a cleaner response
-                embed = discord.Embed(title="🏛️ Market Closed", description="The stock market is currently closed. Trading hours are 9:00 - 17:00 UTC.", color=discord.Color.red())
+                embed = discord.Embed(title="Market Closed", description="The stock market is currently closed. Trading hours are 9:00 - 17:00 UTC.", color=discord.Color.red())
                 await ctx.send(embed=embed)
                 return
             
@@ -840,10 +823,8 @@ class MarketCog(commands.Cog):
         try:
             asset_type = asset_type.lower()
             
-            # --- MODIFIED: Add admin bypass for market hours ---
             if not self.market.market_open and asset_type == "stock" and not is_bot_admin(ctx.author):
-            # --- END MODIFICATION ---
-                embed = discord.Embed(title="🏛️ Market Closed", description="The stock market is currently closed. Trading hours are 9:00 - 17:00 UTC.", color=discord.Color.red())
+                embed = discord.Embed(title="Market Closed", description="The stock market is currently closed. Trading hours are 9:00 - 17:00 UTC.", color=discord.Color.red())
                 await ctx.send(embed=embed)
                 return
                 
