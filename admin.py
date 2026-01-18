@@ -7,23 +7,8 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
-import aiofiles  # <-- ADDED IMPORT
-
-# ---------------- Security Constants ----------------
-class AdminConfig:
-    # Role names for permission system
-    ADMIN_ROLE_NAME = "bot-admin"
-    MOD_ROLE_NAME = "moderator"
-    MUTED_ROLE_NAME = "Muted"
-    
-    # Security settings
-    MAX_CLEAR_MESSAGES = 100
-    MIN_CLEAR_MESSAGES = 1
-    CLEAR_CONFIRMATION_TIMEOUT = 3
-    
-    # Moderation limits
-    MAX_REASON_LENGTH = 1000
-    MAX_BAN_REASON_LENGTH = 512  # Discord limit
+import aiofiles
+from constants import AdminConfig
 
 # ---------------- Security Manager for Admin ----------------
 class AdminSecurityManager:
@@ -184,7 +169,7 @@ class Admin(commands.Cog):
             try:
                 async with aiofiles.open("mod_logs.json", "w") as f:
                     await f.write(json.dumps({}, indent=2))
-                logging.info("✅ Created mod_logs.json")
+                logging.info("Created mod_logs.json")
             except Exception as e:
                 logging.error(f"❌ Failed to create mod_logs.json: {e}")
     
