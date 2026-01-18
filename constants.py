@@ -66,3 +66,32 @@ class GamblingConfig:
     
     # --- RPS ---
     RPS_PAYOUT = 2.2 # (More rewarding)
+
+class MarketConfig:
+    TRADING_HOURS = {"open": 9, "close": 17}  # 9 AM - 5 PM UTC
+    BASE_VOLATILITY = 0.02
+    MAX_VOLATILITY = 0.05
+    NEWS_COOLDOWN = 180  # 3 minutes (Less restrictive)
+    MAX_STOCK_ORDER = 50000  # (Less restrictive)
+    MAX_GOLD_ORDER = 5000    # (Less restrictive)
+    MAX_PORTFOLIO_SIZE = 20  # (Less restrictive)
+    NEWS_IMPACT_MULTIPLIER = 0.75 # (More impactful)
+    MIN_GOLD_PRICE = 1500
+    MAX_GOLD_PRICE = 2500
+    STOCK_MIN_RATIO = 0.5
+    STOCK_MAX_RATIO = 3.0
+
+class AdminConfig:
+    # Role names for permission system
+    ADMIN_ROLE_NAME = "bot-admin"
+    MOD_ROLE_NAME = "moderator"
+    MUTED_ROLE_NAME = "Muted"
+    
+    # Security settings
+    MAX_CLEAR_MESSAGES = 100
+    MIN_CLEAR_MESSAGES = 1
+    CLEAR_CONFIRMATION_TIMEOUT = 3
+    
+    # Moderation limits
+    MAX_REASON_LENGTH = 1000
+    MAX_BAN_REASON_LENGTH = 512  # Discord limit
