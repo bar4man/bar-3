@@ -5,11 +5,11 @@ import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
-from discord.ui import View, Button # <-- ADDED FOR BUTTONS
+from discord.ui import View, Button
 from economy import db
 from constants import BartenderConfig
 from error_handler import ErrorHandler
-from admin import is_bot_admin # <-- IMPORTED ADMIN CHECK
+from admin import is_bot_admin
 
 # ---------------- Bartender Configuration Constants (REMOVED) ----------------
 # All constants are now in constants.py
@@ -142,7 +142,7 @@ class BartenderCog(commands.Cog):
         self.sobering_tasks = {}
         self.security_manager = BartenderSecurityManager()
         self._cooldowns = {}
-        logging.info("✅ Bartender system initialized with security features")
+        logging.info("Bartender system initialized")
     
     def _initialize_drinks(self) -> Dict:
         """Initialize the drink menu with integrated pricing and effects."""
@@ -427,7 +427,7 @@ class BartenderCog(commands.Cog):
             else:
                 if user_id in self.sobering_tasks:
                     del self.sobering_tasks[user_id]
-                logging.info(f"✅ Completed sobering for user {user_id}")
+                logging.info(f"Completed sobering for user {user_id}")
         except Exception as e:
             logging.error(f"Error finishing rapid sobering for user {user_id}: {e}")
             if user_id in self.sobering_tasks:
